@@ -1,0 +1,446 @@
+---
+title: "Chapter 5: Simulation"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Simulation
+
+> Simulation of random variables is important in applied statistics for several reasons. First, we use probability models to mimic variation in the world, and the tools of simulation can help us better understand how this variation plays out. Patterns of randomness are notoriously contrary to normal human thinking--our brains don't seem to be able to do a good job understanding that random swings will be present in the short term but average out in the long run--and in many cases simulation is a big help in training our intuitions about averages and variation. Second, we can use simulation to approximate the sampling distribution of data and propagate this to the sampling distribution of statistical estimates and procedures. Third, regression models are not deterministic; they produce probabilistic predictions. Simulation is the most convenient and general way to represent uncertainties in forecasts. (p. 69)
+
+## 5.1 Simulation of discrete probability models
+
+### 5.1.1 How many girls in 400 births?
+
+Across the world the probability a baby will be born a girl is about 48.8%, with the probability of a boy then being about 51.2%. If you wanted to get a sense of how many girls you'd expect out of 400 births, you could simulate using the `rbinom()` function.
+
+```{r}
+set.seed(5)
+
+rbinom(n = 1, size = 400, prob = .488)
+```
+
+Using the `set.seed()` function makes the result of the pseudorandom number generator reproducible. Now we'll increase the number in the `n` argument to 1,000 to show the distribution of what happens when you do this many times. We'll nest the results within a tibble, which will facilitate plotting the distribution using **ggplot2**.
+
+```{r, message = F, warning = F, fig.width = 5.5, fig.height = 3}
+library(tidyverse)
+
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+# set the seed
+set.seed(5)
+
+# simulate
+tibble(girls = rbinom(n = 1000, size = 400, prob = .488)) %>% 
+  
+  # plot
+  ggplot(aes(x = girls)) +
+  geom_histogram(binwidth = 5) +
+  scale_x_continuous("# girls out of 400", breaks = 7:9 * 25) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)))
+```
+
+Unlike in the text, we will generally avoid working with loops.
+
+### 5.1.2 Accounting for twins.
+
+Now consider there's a 1 in 125 chance a birth event will be for fraternal twins, each of which would have approximately a 49.5% chance of being a girl. Furthermore, there's about a 1 in 300 chance of identical twins, which would have about a 49.5% chance of yielding a pair of girls. This yields two classes of probabilities: the probability of the type of birth, and the probability the baby/babies will be girls, within each type. We'll model the first type of probability with the `sample()` function and the second type with `rbinom()`.
+
+```{r}
+size <- 400
+
+set.seed(5)
+
+d <-
+  tibble(birth_type = sample(c("fraternal twin", "identical twin", "single birth"),
+                             size = size, 
+                             replace = T, 
+                             prob = c(1/125, 1/300, 1 - 1/125 - 1/300))) %>% 
+  mutate(girls = ifelse(birth_type == "single birth", 
+                        rbinom(n = size, size = 1, prob = .488),
+                        ifelse(birth_type == "identical twin", 
+                               2 * rbinom(n = size, size = 1, prob = .495),
+                               rbinom(n = size, size = 2, prob = .495))))
+```
+
+We now have a 400-row tibble in which the `girls` column contains a series of 0's, 1's, and 2's. Here's the count.
+
+```{r}
+d %>% 
+  count(girls)
+```
+
+Here's the grand total of girls.
+
+```{r}
+d %>% 
+  summarise(n_girls = sum(girls))
+```
+
+To change our code to make each row a simulation for which $n = 400$, we just need to replace all those `size = 1` arguments with `size = size`, where we have already defined `size <- 400`.
+
+```{r}
+size <- 400
+
+set.seed(5)
+
+d <-
+  tibble(birth_type = sample(c("fraternal twin", "identical twin", "single birth"),
+                             size = 1000, 
+                             replace = T, 
+                             prob = c(1/125, 1/300, 1 - 1/125 - 1/300))) %>% 
+  mutate(girls = ifelse(birth_type == "single birth", 
+                        rbinom(n = 1000, size = size, prob = .488),
+                        ifelse(birth_type == "identical twin", 
+                               2 * rbinom(n = 1000, size = size, prob = .495),
+                               rbinom(n = 1000, size = size, prob = .495))))
+
+d
+```
+
+Now plot the results in Figure 5.1.
+
+```{r, message = F, warning = F, fig.width = 5.5, fig.height = 3}
+d %>% 
+  ggplot(aes(x = girls)) +
+  geom_histogram(binwidth = 5) +
+  scale_x_continuous("# girls out of 400", breaks = 7:9 * 25) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)))
+```
+
+## 5.2 Simulation of continuous and mixed discrete/continuous models
+
+Here's the simulation.
+
+```{r}
+n_sims <- 1000
+
+set.seed(5)
+
+d <-
+  tibble(y1 = rnorm(n_sims, mean = 3, sd = 0.5)) %>% 
+  mutate(y2 = exp(y1),
+         y3 = rbinom(n_sims, size = 20, prob = .6),
+         y4 = rpois(n_sims, lambda = 5))
+
+
+head(d)
+```
+
+Now summarize each in a histogram and combine them to make Figure 5.2.
+
+```{r, fig.width = 8, fig.height = 5.5}
+p1 <-
+  d %>% 
+  ggplot(aes(x = y1)) +
+  geom_histogram(binwidth = 0.2) +
+  labs(subtitle = "1000 draws from normal dist with dist. with mean 3, sd 0.5") +
+  coord_cartesian(xlim = c(1, 5))
+
+p2 <-
+  d %>% 
+  ggplot(aes(x = y2)) +
+  geom_histogram(binwidth = 5, boundary = 0) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)),
+                     limits = c(0, NA), breaks = 0:5 * 20) +
+  labs(subtitle = "1000 draws from corresponding lognormal dist.")
+
+p3 <-
+  d %>% 
+  ggplot(aes(x = y3)) +
+  geom_histogram(binwidth = 1, boundary = 0) +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(subtitle = "1000 draws from binomial dist. with 20 tries, probability 0.6") +
+  coord_cartesian(xlim = c(0, 20))
+
+p4 <-
+  d %>% 
+  ggplot(aes(x = y4)) +
+  geom_histogram(binwidth = 1, boundary = 0) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)),
+                     breaks = 0:7 * 2) +
+  labs(subtitle = "1000 draws from Poisson dist. with mean 5") +
+  coord_cartesian(xlim = c(0, NA)) +
+  theme()
+
+library(patchwork)
+
+(p1 + p2 + p3 + p4) &
+  scale_y_continuous("Frequency", limits = c(0, NA),
+                     expand = expansion(mult = c(0, 0.05))) &
+  theme(plot.subtitle = element_text(size = 9)) &
+  plot_annotation(title = "Histograms of 1000 simulated values from four distributions, demonstrating the ability to draw\nfrom continuous and discrete random variables in R.")
+```
+
+Here is the code to simulate the hight of one randomly chosen adult.
+
+```{r}
+set.seed(5)
+
+tibble(male = rbinom(1, size = 1, prob = .48)) %>%
+  mutate(height = ifelse(male == 1, 
+                         rnorm(1, mean = 69.1, sd = 2.9), 
+                         rnorm(1, mean = 63.7, sd = 2.7)))
+```
+
+Here's you might simulate ten adults and then take the average of their heights.
+
+```{r}
+# how many would you like?
+n <- 10
+
+set.seed(5)
+
+tibble(male = rbinom(n, size = 1, prob = .48)) %>%
+  mutate(height = ifelse(male == 1, 
+                         rnorm(n, mean = 69.1, sd = 2.9), 
+                         rnorm(n, mean = 63.7, sd = 2.7))) %>% 
+  summarise(avg_height = mean(height))
+```
+
+To simulate the distributions of many average heights based off of $n = 10$ each, we'll first wrap the above code into a custom function.
+
+```{r}
+sim_heights <- function(seed = 1, n = 10) {
+  
+  set.seed(seed)
+
+  tibble(male = rbinom(n, size = 1, prob = .48)) %>%
+    mutate(height = ifelse(male == 1, 
+                           rnorm(n, mean = 69.1, sd = 2.9), 
+                           rnorm(n, mean = 63.7, sd = 2.7))) %>% 
+    summarise(avg_height = mean(height)) %>% 
+    pull(avg_height)
+
+}
+```
+
+Now we'll iterate that custom function within a nested tibble framework. The initial `seed` column will serve a double purpose as both the seed value for the pseudorandom number generators in each iteration and as the iteration index.
+
+```{r}
+d <-
+  tibble(seed = 1:1000) %>% 
+  mutate(avg_height = map_dbl(seed, sim_heights))
+
+head(d)
+```
+
+Here's the histogram.
+
+```{r, fig.width = 4.5, fig.height = 2.75}
+d %>% 
+  ggplot(aes(x = avg_height)) +
+  geom_histogram(binwidth = .5) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Dist of avg height of 10 adults")
+```
+
+Here's the process for simulating maximum heights, instead.
+
+```{r, fig.width = 4.5, fig.height = 2.75}
+# adjust the simulation function
+sim_heights <- function(seed = 1, n = 10) {
+  
+  set.seed(seed)
+
+  tibble(male = rbinom(n, size = 1, prob = .48)) %>%
+    mutate(height = ifelse(male == 1, 
+                           rnorm(n, mean = 69.1, sd = 2.9), 
+                           rnorm(n, mean = 63.7, sd = 2.7))) %>% 
+    # the next two lines are different from the original code
+    summarise(max_height = max(height)) %>% 
+    pull(max_height)
+
+}
+
+# simulate the data
+tibble(seed = 1:1000) %>% 
+  mutate(max_height = map_dbl(seed, sim_heights)) %>%
+  
+  # plot!
+  ggplot(aes(x = max_height)) +
+  geom_histogram(binwidth = .5) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Dist of max height of 10 adults")
+```
+
+### 5.2.1 Simulation in R using custom-made functions.
+
+Our code above already incorporated custom-made functions. But instead of nesting those functions into the `replicate()` function, we iterated with them using `purrr::map()`.
+
+## 5.3 Summarizing a set of simulations using median and median absolute deviation
+
+Though one can investigate simulations using plots, as above, it can be helpful to summarize them in terms of location (central tendency) and scale (spread). Location is often assessed using the mean (`mean()`) or median (`median()`). Standard deviation (`sd()`) and its square, variance (`var()`), are the most popular ways to assess spread. However, Gelman and colleagues also like the *median absolute deviation*. 
+
+> If the median of a set of simulations $z_1, \dots, z_n$, is $M$, then the median absolute deviation is $\operatorname{mad} = \operatorname{median}_{i=1}^n |z_i - M|$. However, because we are so used to working with standard deviations, when we compute the median absolute deviation, we then rescale it by multiplying by 1.483, which reproduces the standard deviation in the special case of the normal distribution. We call this the "mad sd" (p. 73).
+
+The mad sd is available with the base **R** function `mad()`. If you execute `?mad`,  you'll see one of the arguments is `constant`, the default for which is `1.4826`. One can also compute the mad sd by hand with `1.4826 * median(abs(z - median(z)))`, where `z` is a vector of values.
+
+Here we simulate 10,000 draws from $\mathcal N(5, 2)$ and then compute the mean, median, standard deviation and mad sd using the above-mentioned base **R** funcitons.
+
+```{r}
+set.seed(5)
+
+z <- rnorm(1e4, 5, 2)
+
+cat("mean =", mean(z), ", median =", median(z), ", sd =", sd(z), ", mad sd =", mad(z))
+```
+
+The `cat()` function allowed us to concatenate the values and then print. Here's how to compute the mad sd by hand.
+
+```{r}
+1.4826 * median(abs(z - median(z)))
+```
+
+If we wanted to work with a **tidyverse**-oriented flow, we might execute something like this.
+
+```{r}
+set.seed(5)
+
+tibble(z = rnorm(1e4, mean = 5, sd = 2)) %>% 
+  summarise(mean   = mean(z),
+            median = median(z),
+            sd     = sd(z),
+            mad_sd = mad(z))
+```
+
+"The standard deviation of the mean of $N$ draws from a distribution is simply the standard deviation of the distribution divided by $\sqrt{N}$" (p. 73). For the simulation above, that would be $2.02 / \sqrt{10{,}000} = 0.0202$. When we fit a regression model using `brms::brm()`, the coefficients are typically summarized by their mean, standard deviation, and percentile-based 95% intervals. However, it is also possible to substitute the mean for the median and the standard deviation for the mad sd. 
+
+We can compute quantile-based intervals using the base **R** `quantile()` function. Here are the 50% and 95% intervals for `z`.
+
+```{r}
+# 50%
+quantile(z, probs = c(.25, .75))
+# 95%
+quantile(z, probs = c(.025, .975))
+```
+
+## 5.4 Bootstrapping to simulate a sampling distribution
+
+The *bootstrapping* approach allows us to express uncertainty by taking samples from a preexisting data source. In these instances, the resamples are done with replacement, meaning that a given case in the data can be samples multiple times in a given iteration, whereas other cases might not be resamples in a given iteration. This insures the $n$ will be the same across iterations. 
+
+Load the `earnings.csv` data.
+
+```{r, message = F}
+earnings <- read_csv("ROS-Examples-master/Earnings/data/earnings.csv")
+
+head(earnings)
+```
+
+Here is the ratio of median `earn` values, by `male`.
+
+```{r}
+earnings %>% 
+  summarise(ratio = median(earn[male == 0]) / median(earn[male == 1]))
+```
+
+This means the median earnings of women in this sample are 60% of that for men. 
+
+```{r}
+n <- nrow(earnings)
+
+earnings %>% 
+  slice_sample(n = n, replace = T) %>% 
+  summarise(ratio = median(earn[male == 0]) / median(earn[male == 1]))
+```
+
+We'll make an adjusted `boot_ratio()` function designed for use within `purrr::map_dbl()`.
+
+```{r}
+boot_ratio <- function(seed) {
+  
+  set.seed(seed)
+  
+  n <- nrow(earnings)
+  
+  earnings %>% 
+    slice_sample(n = n, replace = T) %>% 
+    summarise(ratio = median(earn[male == 0]) / median(earn[male == 1])) %>% 
+    pull(ratio)
+  
+}
+```
+
+Run the simulation for 10,000 iterations.
+
+```{r sim_boot_ratio, message = F}
+n_sims <- 10000
+
+d <-
+  tibble(seed = 1:n_sims) %>% 
+  mutate(ratio = map_dbl(seed, boot_ratio))
+```
+
+Here's a histogram of the `ratio` results.
+
+```{r, fig.width = 4.5, fig.height = 2.75}
+d %>% 
+  ggplot(aes(x = ratio)) +
+  geom_histogram(binwidth = .01) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.05)))
+```
+
+Here's the standard deviation.
+
+```{r}
+d %>% 
+  summarise(sd = sd(ratio))
+```
+
+The standard deviation from a bootstrapped sample can be called the bootstrap standard error. Thus, we might say the ratio has a standard error of about `r round(summarise(d, sd = sd(ratio)), 2)`.
+
+### 5.4.1 Choices in defining the bootstrap distribution.
+
+Given a simple regression model $y_i = \beta_0 + \beta_1 x_i + \epsilon_i$, one can simply resample the data $(x, y)i$. Alternatively, you might resample the residuals from the model, $r_i = y_i - (\hat \beta_0 + \hat \beta_1 x_i)$. You'd then add the residuals back to create bootstrapped data, $y^\text{boot} = X_i \hat \beta + r_i^\text{boot}$. You could do this once for a single bootstrapped data set or many times to get the bootstrapped sampling distribution. Things get more complicated with complex data.
+
+#### 5.4.1.1 Timeseries.
+
+Consider time series $(t, y)i$ data for which $y_i, \dots, y_n$ are structured in time $t_i, \dots t_t$. Simple resampling would jumble the time structure in undesirable ways.
+
+#### 5.4.1.2 Multilevel structure.
+
+Given data where cases are nested within many groups, one might resample cases, resample groups, or sequentially resample groups first and then cases second. 
+
+> These three choices correspond to different sampling models and yield different bootstrap standard errors for estimates of interest. Similar questions arise when there are multiple observations on each person in a dataset: Should people be resampled, or observations, or both? (p. 75)
+
+#### 5.4.1.3 Discrete data.
+
+In simple logistic regression with binary data--which is the same as $\operatorname{binomial}(p_i, n)$, where $n = 1$ across cases--, simply resmapling the data $(x, y)i$ can work. But when working with binomial data $(x, n, y)i$, for which $n$ varies across cases, choices expand. You might resample clusters $(x, n, y)i$. You might also disaggregate the data so that each cluster is depicted by $n$ data points, which would transform $(x_i, n_i, y_i)$ into "$y_i$ observations of the form $(x_i, 1)$ and $n_i − y_i$ observations of the form $(x_i, 0)$, and then bundle these all into a logistic regression with $\sum_i n_i$ data points" (p. 75). Then you'd apply the boostrap.
+
+### 5.4.2 Limitations of bootstrapping.
+
+> One of the appeals of the bootstrap is its generality. Any estimate can be bootstrapped; all that is needed are an estimate and a sampling distribution. The very generality of the bootstrap creates both opportunity and peril, allowing researchers to solve otherwise intractable problems but also sometimes leading to an answer with an inappropriately high level of certainty. (p. 75)
+
+## 5.5 Fake-data simulation as a way of life
+
+"The point of the fake-data simulation is not to provide insight into the data or the real-world problem being studied, but rather to evaluate the properties of the statistical methods being used, given an assumed generative model" (p. 76)
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+

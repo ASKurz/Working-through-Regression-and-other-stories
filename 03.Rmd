@@ -1,0 +1,927 @@
+---
+title: "Chapter 3: Some basic methods in mathematics and probability"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Some basic methods in mathematics and probability
+
+> Simple methods from introductory mathematics and statistics have three important roles in regression modeling. First, linear algebra and simple probability distributions are the building blocks for elaborate models. Second, it is useful to understand the basic ideas of inference separately from the details of particular classes of model. Third, it is often useful in practice to construct quick estimates and comparisons for small parts of a problem--before fitting an elaborate model, or in understanding the output from such a model. (p. 36)
+
+## 3.1 Weighted averages
+
+> In 2010 there were 456 million people living in North America: 310 million residents of the United States, 112 million Mexicans, and 34 million Canadians. The average age of people in each country in that year is displayed in Figure 3.1. The average age of all North Americans is a *weighted average*:
+>
+> \begin{align*}
+> \text{average age} & = \frac{310{,}000{,}000 \cdot 36.8 + 112{,}000{,}000 \cdot 26.7 + 34{,}000{,}000 \cdot 40.7}{310{,}000{,}000 + 112{,}000{,}000 + 34{,}000{,}000} \\
+> & = 34.6.
+> \end{align*}
+>
+> This is a weighted average rather than a simple average because the numbers 36.8, 26.7, 40.7 are multiplied by "weights" proportional to the population of each country. The total population of North America was 310 + 112 + 34 = 456 million, and we can rewrite the above expression as
+>
+> \begin{align*}
+> \text{average age} & = \frac{310{,}000{,}000}{456{,}000{,}000} \cdot 36.8 + \frac{112{,}000{,}000}{456{,}000{,}000} \cdot 26.7 + \frac{34{,}000{,}000}{456{,}000{,}000} \cdot 40.7 \\
+> & = 0.6798 \cdot 36.8 + 0.2456 \cdot 26.7 + 0.0746 \cdot 40.7 \\
+> & = 34.6.
+> \end{align*}
+> 
+> The above proportions 0.6798, 0.2456, and 0.0746 (which by necessity sum to 1) are the *weights* of the countries in this weighted average.
+>
+> We can equivalently write a weighted average in summation notation:
+>
+> $$\text{weighted average} = \frac{\sum_j N_j \bar y_j}{\sum_j N_j},$$
+>
+> where $j$ indexes countries and the sum adds over all the *strata* (in this case, the three countries). (p. 35, *emphasis* in the original)
+
+Here's that in a tibble.
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+d <-
+  tibble(stratum    = 1:3,
+         label      = c("US", "Mexico", "Canada"),
+         population = c(310, 112, 34) * 1e6,
+         age_bar    = c(36.8, 26.7, 40.7))
+
+# this is the tibble version of Figure 3.1
+d
+
+# compute the weighted average
+d %>% 
+  summarise(weighted_average = sum(population * age_bar) / sum(population))
+```
+
+Here's a similar set-up, this time for the weighted average age of US women and men.
+
+```{r}
+d <-
+  tibble(stratum = 1:2,
+         label   = c("women", "men"),
+         percent = c(51, 49),
+         age_bar = c(38.1, 35.5))
+
+# table form
+d
+
+# compute the weighted average
+d %>% 
+  summarise(weighted_average = sum(percent * age_bar) / sum(percent))
+```
+
+And here's the set-up for the average salary of US teachers, weighted by women and men.
+
+```{r}
+d <-
+  tibble(stratum    = 1:2,
+         label      = c("women", "men"),
+         population = c(57, 15) * 1e5,
+         percent    = c(79, 21),
+         salary_bar = c(45865, 49207))
+
+# table form
+d
+
+# compute the weighted average
+d %>% 
+  summarise(weighted_average = sum(percent * salary_bar) / sum(percent))
+```
+
+## 3.2 Vectors and matrices
+
+"A list of numbers is called a *vector*. A rectangular array of numbers is called a *matrix*" (p. 36, *emphasis* in the original). Recall the elections/economy example from Section 1.2, wherein we found
+
+\begin{align*}
+\text{predicted vote percentage} & = 46.3 + 3.0 \cdot (\text{growth rate of average personal income}) \\
+\hat y & = 46.3 + 3.0 x \\
+\hat y & = \hat a + \hat b x,
+\end{align*}
+
+wherein $\hat a$ and $\hat b$ denote the estimates for the coefficients expressed as numbers in the line above. $\hat y$ denotes the predicted value for the criterion, *predicted vote percentage*. This notation distinguishes the prediction $\hat y$ from the results of an actual election $y$. With this set-up, we can plug various values of $x$ to get the associated values for $\hat y$. Here's what happens when we use -1, 0, and 3.
+
+```{r}
+tibble(a_hat = 46.3,
+       b_hat = 3.0,
+       x     = c(-1, 0, 3)) %>% 
+  mutate(formula = str_c(a_hat, " + ", b_hat, " * ", x)) %>% 
+  mutate(y_hat = a_hat + b_hat * x)
+```
+
+Here's what that looks like in vector notation,
+
+$$\hat y = \begin{bmatrix} 43.4 \\ 46.3 \\ 55.3 \end{bmatrix} = \begin{bmatrix} 46.3 + 3.0 \cdot (-1)\\ 46.3 + 3.0 \cdot 0 \\ 46.3 + 3.0 \cdot 3\end{bmatrix},$$
+
+here's what that looks like in matrix form,
+
+$$\hat y = \begin{bmatrix} 43.4 \\ 46.3 \\ 55.3 \end{bmatrix} = \begin{bmatrix} 1 & -1 \\ 1 & 0 \\ 1 & 3 \end{bmatrix} \begin{bmatrix} 46.3 \\ 3.0 \end{bmatrix},$$
+
+which can be expressed in the abstract and rather compact form,
+
+$$\hat y = X \hat \beta,$$
+
+where $X$ is a $3 \times 2$ matrix and $\hat \beta$ is the vector of the two estimated coefficients, 46.3 and 3.0. We could have also used parentheses $()$ instead of brackets $[]$. However, I'm inclined to reserve parentheses for likelihoods, other functions, and simple groupings within equations. To each their own.
+
+## 3.3 Graphing a line
+
+"To use linear regression effectively, you need to understand the algebra and geometry of straight lines" (p. 37).
+
+Here's how to make line plots of Figure 3.2.
+
+```{r, fig.width = 8, fig.height = 2.75}
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+a <- 0
+b <- 1
+
+# left
+p1 <-
+  tibble(x = 0:2) %>% 
+  mutate(y = a + b * x) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)), breaks = 0:2) +
+  scale_y_continuous(breaks = 0:2, labels = c("a", "a+b", "a+2b")) +
+  labs(subtitle = expression(y==a+bx~(with~b>0)))
+
+b <- -1
+
+# right
+p2 <-
+  tibble(x = 0:2) %>% 
+  mutate(y = a + b * x) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)), breaks = 0:2) +
+  scale_y_continuous(breaks = 0:-2, labels = c("a", "a+b", "a+2b")) +
+  labs(subtitle = expression(y==a+bx~(with~b<0)))
+
+# combine with patchwork
+library(patchwork)
+
+p1 + p2
+```
+
+Here's Figure 3.3.
+
+```{r, fig.width = 8, fig.height = 2.75, warning = F}
+a <- 1007
+b <- -0.393
+
+# left
+p1 <-
+  tibble(x = 0:2) %>% 
+  mutate(y = a + b * x) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous(breaks = round(a + b * 0:2, digits = 1)) +
+  labs(subtitle = expression(y==1007-0.393*x))
+  
+# right
+p2 <-
+  tibble(x = 0:2 * 50 + 1900) %>% 
+  mutate(y = a + b * x) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  annotate(geom = "text",
+           x = 1963, y = 245,
+           label = expression(y==1007-0.393*x),
+           parse = T) +
+  scale_x_continuous("Year", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("Time (seconds)", breaks = 22:26 * 10) +
+  labs(subtitle = "Approx. trend of record times in the mile run")
+
+# combine
+p1 + p2
+```
+
+## 3.4 Exponential and power-law growth and decline; logarithmic and log-log relationships
+
+> The line $y = a + bx$ can be used to express a more general class of relationships by allowing logarithmic transformations.
+>
+> The formula $\log y = a + bx$ represents exponential growth (if $b > 0$) or decline (if $b < 0$): $y = Ae^{bx}$, where $A = e^a$. The parameter $A$ is the value of $y$ when $x = 0$, and the parameter $b$ determines the rate of growth or decline. (p. 38)
+
+Here's how we might visualize the authors' example of exponential population growth, starting with 1.5 billion in 1900 and doubling every fifty years along the lines of the equation $y = A \cdot2^{(x - 1900) / 50}$, where $A = 1.5 \cdot 10^9$.
+
+```{r, fig.width = 4, fig.height = 2.75}
+a <- 1.5 * 1e9
+
+tibble(x = 1900:2000) %>% 
+  mutate(y = a * 2^((x - 1900) / 50)) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_y_continuous("Population (bilions)", breaks = 1:6 * 1e9, labels = 1:6, limits = c(1e9, 6e9)) +
+  labs(subtitle = expression(y==italic(A)%*%2^{(x-1900)/50}),
+       x = NULL)
+```
+
+Note that because this is a curvilinear relation, we evaluated $\hat y$ over a large numbers of $x$ values. Otherwise the trajectory would have looked like a series of adjacent straight lines.
+
+Now here's a plot of the 20-year exponential decline of an asset that was worth $1,000 upon purchase and declined in value by 20% each year.
+
+```{r, fig.width = 4, fig.height = 2.75}
+a <- 1e3
+
+tibble(x = seq(from = 0, to = 20, by = 0.2)) %>% 
+  mutate(y = a * 0.8^x) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_x_continuous("Years since asset acquired", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous(NULL, breaks = 0:5 * 200, labels = function(x) str_c("$", x),
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  labs(subtitle = expression(y==1000%*%0.8^x),
+       x = NULL)
+```
+
+Now we move from exponential-growth functions to power-law growth functions:
+
+> The formula $\log y = a + b \log x$ represents power-law growth (if $b > 0$) or decline (if $b < 0$): $y = Ax^b$, where $A = e^a$ . The parameter $A$ is the value of $y$ when $x = 1$, and the parameter $b$ determines the rate of growth or decline. A one-unit difference in $\log x$ corresponds to an additive difference of $b$ in $\log y$. (pp. 38--39)
+
+Just in case you missed it, both $x$ and $y$ variables have been logged in this set-up.
+
+Consider the example where $y$ is the area of a square and $x$ is its perimeter. We get $y = (x / 4)^2$. If we take the log of both sides, we get $\log y = 2(\log x - \log 4) = -2.8 + 2 \log x$. Here that is in a plot.
+
+```{r, fig.width = 8, fig.height = 2.75}
+p1 <-
+  tibble(x = seq(from = 0, to = 20, by = 0.2)) %>% 
+  mutate(y = (x / 4)^2) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_x_continuous("perimeter of a square", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("area of a square", expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(y==(x/4)^2))
+
+a <- -2.8
+b <- 2
+
+p2 <-
+  # since log 0 = -infinity, start above 0
+  tibble(x = seq(from = 0.01, to = 20, length.out = 20)) %>% 
+  mutate(log_x = log(x)) %>% 
+  mutate(log_y = a + b * log_x) %>%
+  
+  ggplot(aes(x = log_x, y = log_y)) +
+  geom_line() +
+  scale_x_continuous("log(perimeter of a square)", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("log(area of a square)", expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(log~y==-2.8+2~log~x))
+
+p1 + p2
+```
+
+Next we call the surface area of a cube $y$, the volume of said cube $x$, and the length of a side of the cube $L$. We get $y = 6L^2$ and $x = L^3$, which also means $y = 6x^{2/3}$, which can also be expressed as $\log y = \log 6 + \frac{2}{3} \log x = 1.8 + \frac{2}{3} \log x$.
+
+```{r, fig.width = 8, fig.height = 2.75}
+p1 <-
+  tibble(x = seq(from = 0, to = 20, by = 0.2)) %>% 
+  mutate(y = 6 * x^(2/3)) %>%
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  scale_x_continuous("volume of a cube", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("surface area of a cube", expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(y==6*x^{2/3}))
+
+a <- 1.8
+b <- 2/3
+
+p2 <-
+  # since log 0 = -infinity, start above 0
+  tibble(x = seq(from = 0.01, to = 20, length.out = 20)) %>% 
+  mutate(log_x = log(x)) %>% 
+  mutate(log_y = a + b * log_x) %>%
+  
+  ggplot(aes(x = log_x, y = log_y)) +
+  geom_line() +
+  scale_x_continuous("log(volume of a cube)", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("log(surface area of a cube)", expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(log~y==1.8+2/3~log~x))
+
+p1 + p2
+```
+
+Whereas the power-law growth is curvilinear in the natural metric, it is linear in the log-log metric.
+
+Footnote #2 seems to suggests the code for Figure 3.4 lives in the `metabolic` folder. Though that folder contains `.R` and `.Rmd` files for the Figure 3.5, it does not contain the data file necessary to make Figure 3.4. If you look at the code in those files, the authors only provided exact data points for three animals: the mouse, the man, and the elephants. Though those three points aren't enough to get us Figure 3.4, they are enough for Figure 3.5. Here's the left panel.
+
+```{r, fig.width = 4, fig.height = 2.75, warning = F}
+# left
+p1 <-
+  tibble(mass   = log(c(0.02, 65, 3000)),
+         meta   = log(c(0.17, 90, 2000)),
+         label  = c("Mouse", "Man", "Elephant"),
+         offset = c(0.25, 0.25, -0.25),
+         hjust  = c(0, 0, 1)) %>% 
+  
+  ggplot(aes(y = meta)) +
+  geom_abline(intercept = 1.4, slope = 0.74, size = 1/4) +
+  geom_point(aes(x = mass)) +
+  geom_text(aes(x = mass + offset, label = label, hjust = hjust),
+            size = 2.5) +
+  scale_x_continuous(breaks = -2:4 * 2) +
+  labs(subtitle = expression(log(y)==1.4+0.74~log(x)),
+       x = "log (body mass in kilograms)",
+       y = "log (metabolic rate in watts)")
+```
+
+Now make the right panel of Figure 3.5 and combine the two.
+
+```{r, fig.width = 8, fig.height = 2.875, warning = F}
+# right
+p2 <-
+  tibble(mass   = c(0.02, 65, 3000),
+         meta   = c(0.17, 90, 2000),
+         label  = c("Mouse", "Man", "Elephant"),
+         offset = c(50, 50, -50),
+         hjust  = c(0, 0, 1)) %>% 
+  
+  ggplot(aes(y = meta)) +
+  geom_point(aes(x = mass)) +
+  geom_text(aes(x = mass + offset, label = label, hjust = hjust),
+            size = 2.5) +
+  geom_function(fun = function(x) exp(1.4 + 0.74 * log(x))) +
+  scale_x_continuous(breaks = 0:6 * 500, limits = c(0, NA),
+                     expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.05))) +
+  labs(subtitle = expression(y==~italic(e)^{1.4+0.74~log~x}==4.1~x^{0.74}),
+       x = "body mass in kilograms",
+       y = "metabolic rate in watts")
+
+# combine
+p1 + p2
+```
+
+## 3.5 Probability distributions
+
+> A key component of regression modeling is to describe the typical range of values of the outcome variable, given the predictors. This is done in two steps that are conceptually separate but which in practice are performed at the same time. The first step is to predict the average value of the outcome given the predictors, and the second step is to summarize the variation in this prediction. Probabilistic distributions are used in regression modeling to help us characterize the variation that remains *after* predicting the average. These distributions allow us to get a handle on how uncertain our predictions are and, additionally, our uncertainty in the estimated parameters of the model. (p. 41, *emphasis* in the original)
+
+### 3.5.1 Mean and standard deviation of a probability distribution.
+
+Given a random variable $z$, 
+
+* "the *mean* is also called the expectation or expected value and is written as $\operatorname E(z)$ or $\mu_z$.... 
+* "the *variance* of the distribution of $z$ is $\operatorname E((z − \mu_z)^2)$, that is, the mean of the squared difference from the mean....
+* "the *standard deviation* is the square root of the variance" (p. 41, *emphasis* in the original). 
+
+Figure 3.6a shows the idealized distribution of heights of US women, for which the mean is 63.7 inches and the standard deviation is 2.7 inches. We can make the shape of that distribution with the `dnorm()` function.
+
+```{r, fig.width = 3, fig.height = 2.25}
+mean <- 63.7
+sd <- 2.7
+
+tibble(height = seq(from = 55, to = 80, by = 0.1)) %>% 
+  mutate(density = dnorm(height, mean = mean, sd = sd)) %>% 
+  
+  ggplot(aes(x = height, y = density)) +
+  geom_line() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  labs(subtitle = "heights of women\n(normal distribution)",
+       x = "height (inches)")
+```
+
+You can use the `rnorm()` function to take random draws from a given Gaussian distribution. Here we'll take 1,000.
+
+```{r}
+set.seed(3)
+
+d <-
+  tibble(z = rnorm(n = 1000, mean = mean, sd = sd))
+
+d
+```
+
+We can hand compute the sample mean.
+
+```{r}
+d %>% 
+  summarise(mean = sum(z) / 1000)
+```
+
+We can also hand compute the variance.
+
+```{r}
+d %>% 
+  mutate(squared_difference_from_mean = (z - mean(z))^2) %>% 
+  summarise(variance = sum(squared_difference_from_mean) / 1000)
+```
+
+It's more convenient if we use the `mean()` and `var()` functions. We'll throw in `sd()`, too.
+
+```{r}
+d %>% 
+  summarise(mean = mean(z),
+            var  = var(z),
+            sd   = sd(z))
+```
+
+### 3.5.2 Normal distribution; mean and standard deviation.
+
+> The Central Limit Theorem of probability states that the sum of many small, independent random variables will be a random variable that approximates what is called a *normal distribution*. If we write this summation of independent components as $z = \sum_{i=1}^n z_i$, then the mean and variance of $z$ are the sums of the means and variances of the $z_i$'s: $\mu_z = \sum_{i=1}^n \mu_{z_i}$ and $\sigma_z = \sqrt{\sum_{i=1}^n \sigma_{z_i}^2}$. In statistical notation, the normal distribution is written as $z \sim \operatorname N (\mu_z, \sigma_z^2)$. (pp. 41--42, *emphasis* in the original)
+
+We can more simply write the normal distribution with $\mu$ and $\sigma$ as $\operatorname N(\mu, \sigma)$.
+
+Here's Figure 3.7, the normal distribution with areas of probability mass marked off by standard deviations.
+
+```{r, fig.width = 5, fig.height = 2.875}
+tibble(z = seq(from = -4, to = 4, by = 0.01)) %>% 
+  mutate(density = dnorm(z, mean = 0, sd = 1)) %>% 
+  
+  ggplot(aes(x = z, y = density, ymin = 0, ymax = density)) +
+  geom_ribbon(data = . %>% filter(z >= -3 & z <= 3),
+              fill = "dodgerblue4") +
+  geom_ribbon(data = . %>% filter(z >= -2 & z <= 2),
+              fill = "dodgerblue3") +
+  geom_ribbon(data = . %>% filter(z >= -1 & z <= 1),
+              fill = "dodgerblue2") +
+  geom_line() +
+  annotate(geom = "text",
+           x = c(-1.5, 0, 1.5),
+           y = c(0.05, 0.15, 0.05),
+           label = c("13.5%", "68%", "13.5%"),
+           color = "white") +
+  scale_x_continuous(NULL, breaks = -3:3, expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "normal distribution")
+```
+
+We can compute those percentage estimates with a little `pnorm()`.
+
+```{r}
+pnorm(-1) - pnorm(-2)
+pnorm(1) - pnorm(-1)
+pnorm(2) - pnorm(1)
+```
+
+About half of the probability mass falls in the range $\mu \pm 0.67$.
+
+```{r}
+pnorm(0 + 0.67) - pnorm(0 - 0.67)
+```
+
+Here are the proportions of the probability mass falling within $\mu \pm 2 \sigma$ and $\mu \pm 3 \sigma$.
+
+```{r}
+pnorm(0 + 2) - pnorm(0 - 2)
+pnorm(0 + 3) - pnorm(0 - 3)
+```
+
+We might back up a bit and make the full version of Figure 3.6, which demonstrates that a mixture of two normal distributions is not necessarilly itself normally distributed.
+
+```{r, fig.width = 8, fig.height = 2.5}
+# women
+mean <- 63.7
+sd <- 2.7
+
+p1 <-
+  tibble(height = seq(from = 55, to = 80, by = 0.1)) %>% 
+  mutate(density = dnorm(height, mean = mean, sd = sd)) %>% 
+  
+  ggplot(aes(x = height, y = density)) +
+  geom_line() +
+  labs(subtitle = "heights of women\n(normal distribution)",
+       x = "height (inches)")
+
+# men
+mean <- 69.1
+sd <- 2.9
+
+p2 <-
+  tibble(height = seq(from = 55, to = 80, by = 0.1)) %>% 
+  mutate(density = dnorm(height, mean = mean, sd = sd)) %>% 
+  
+  ggplot(aes(x = height, y = density)) +
+  geom_line() +
+  labs(subtitle = "heights of men\n(normal distribution)",
+       x = "height (inches)")
+
+# mixture of women and men
+p3 <-
+  tibble(height = seq(from = 55, to = 80, by = 0.1)) %>% 
+  mutate(density = .52 * dnorm(height, mean = 63.7, sd = 2.7) + .48 * dnorm(height, mean = 69.1, sd = 2.9)) %>% 
+  
+  ggplot(aes(x = height, y = density)) +
+  geom_line() +
+  labs(subtitle = "heights of all adults\n(not a normal distribution)",
+       x = "height (inches)")
+
+# combine!
+(p1 + p2 + p3) &
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) &
+  theme(plot.subtitle = element_text(hjust = .5))
+```
+
+> The normal distribution is useful in part because summaries such as sums, differences, and estimated regression coefficients can be expressed mathematically as averages or weighted averages of data. There are many situations in which we can use the normal distribution to summarize uncertainty in estimated averages, differences, and regression coefficients, even when the underlying data do not follow a normal distribution. (p. 42)
+
+### 3.5.3 Linear transformations.
+
+> Linearly transformed normal distributions are still normal. If $y$ is a variable representing men's heights in inches, with mean 69.1 and standard deviation 2.9, then 2.54 $y$ is height in centimeters, with mean 2.54 * 69 = 175 and standard deviation 2.54 * 2.9 = 7.4. (p. 42).
+
+We might explore that with random draws from those distributions.
+
+```{r, fig.width = 6, fig.height = 2.25}
+n <- 2e5
+
+set.seed(3)
+
+tibble(inches = rnorm(n, mean = 69.1, sd = 2.9),
+       cm     = rnorm(n, mean = 2.54 * 69, sd = 2.54 * 2.9)) %>% 
+  pivot_longer(everything()) %>% 
+  mutate(name = factor(name, levels = c("inches", "cm"))) %>% 
+  
+  ggplot(aes(x = value)) +
+  geom_histogram(fill = "grey50", bins = 60) +
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05))) +
+  xlab(NULL) +
+  facet_wrap(~name, scales = "free")
+```
+
+> For a slightly more complicated example, suppose we take independent samples of 100 men and 100 women and compute the difference between the average heights of the men and the women. This difference will be approximately normally distributed with mean 69.1 − 63.7 = 5.4 and standard deviation $\sqrt{2.9^2 / 100 + 2.7^2 / 100} = 0.4$ (p. 42)
+
+Here's the simulation.
+
+```{r}
+n <- 100
+
+set.seed(3)
+
+d <-
+  tibble(men   = rnorm(n, mean = 69.1, sd = 2.9),
+         women = rnorm(n, mean = 63.7, sd = 2.7)) %>% 
+  mutate(difference = men - women)
+```
+
+Here are the mean and standard deviation of the difference.
+
+```{r}
+d %>% 
+  summarise(mean = mean(difference),
+            sd = sd(difference))
+```
+
+At first glance, it might be unclear why our standard deviation for `difference` is an order of magnitude larger than the value Gelman et al reported in the text. If you work through their standard deviation formula in **R**, you'll see their algebra is correct.
+
+```{r}
+sqrt(2.9^2 / 100 + 2.7^2 / 100)
+```
+
+The reason is because Gelman et al were talking about the standard deviation of the distribution of means if you were to take a large number of random samples of $n = 100$ and compute the mean for each. We can do that with help from a custom function, which we'll call `sim_difference()`.
+
+```{r}
+sim_difference <- function(seed) {
+  
+  set.seed(seed)
+  
+  tibble(men   = rnorm(n, mean = 69.1, sd = 2.9),
+         women = rnorm(n, mean = 63.7, sd = 2.7)) %>% 
+    transmute(difference = men - women) %>% 
+    summarise(mean = mean(difference)) %>% 
+    pull(mean)
+  
+}
+```
+
+Here we'll use our custom `sim_difference()` to compute the mean from 100 simulations, for which we took the mean of 100 draws from the difference. Then we'll compute the standard deviation of those 100 means.
+
+```{r}
+tibble(seed = 1:n) %>% 
+  mutate(mean = map_dbl(seed, sim_difference)) %>% 
+  summarise(sd = sd(mean))
+```
+
+Yep, there it is. That's what the authors were referring to with the expression $\sqrt{2.9^2 / 100 + 2.7^2 / 100} = 0.4$. This was the standard error of the mean, which is $\text{SEM} = \frac{s}{\sqrt n}$, where $s$ is the standard deviation in the sample. We can use that formula to compute $\text{SEM}$ from the simulated `d` data from above.
+
+```{r}
+d %>% 
+  summarise(s = sd(difference)) %>% 
+  summarise(sem = s / sqrt(n))
+```
+
+Boom! If you have population values rather than sample estimates, you can define the standard error of the mean as $\text{SEM} = \frac{\sigma}{\sqrt n}$, where $\sigma$ is the standard deviation in the population.
+
+### 3.5.4 Mean and standard deviation of the sum of correlated random variables.
+
+"If two random variables $u$ and $v$ have mean $\mu_u$, $\mu_v$ and standard deviations $\sigma_a$, $\sigma_b$ , then their correlation is defined as $\rho_{uv} = \operatorname E ((u - \mu_u)(v - \mu_v)) / (\sigma_a \sigma_b)$" (p. 43).
+
+### 3.5.5 Lognormal distribution.
+
+> It is often helpful to model all-positive random variables on the logarithmic scale because it does not allow for values that are 0 or negative. For example, the logarithms of men's weights (in pounds) have an approximate normal distribution with mean 5.13 and standard deviation 0.17. (p. 43)
+
+This is depicted in Figure 3.8.
+
+```{r, fig.width = 6, fig.height = 2.5}
+p1 <-
+  tibble(log_weight = seq(from = 4, to = 6, by = 0.01)) %>% 
+  mutate(density = dnorm(log_weight, mean = 5.13, sd = 0.17)) %>% 
+  
+  ggplot(aes(x = log_weight, y = density)) +
+  geom_line() +
+  labs(subtitle = "log weights of men\n(normal distribution)",
+       x = "logarithm of weight in pounds")
+
+
+p2 <-
+  tibble(weight = 50:350) %>% 
+  mutate(density = dlnorm(weight, meanlog = 5.13, sdlog = 0.17)) %>%
+  
+  ggplot(aes(x = weight, y = density)) +
+  geom_line() +
+  scale_x_continuous(breaks = 1:7 * 50) +
+  labs(subtitle = "weights of men\n(lognormal distribution)",
+       x = "weight in pounds")
+
+# combine!
+(p1 + p2) &
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) &
+  theme(plot.subtitle = element_text(hjust = .5))
+```
+
+In case it wasn't clear, the`dlnorm()` function parameterizes the lognormal distribution in terms of the mean of the log of the distribution (`meanlog`) and the standard deviation of the log of the distribution (`sdlog`). That's whey we entered in 5.13 and 0.17, respectively, rather than 169 and 1.18, respectively. To exhaust the point, consider this.
+
+```{r}
+exp(5.13)
+exp(0.17)
+```
+
+### 3.5.6 Binomial distribution.
+
+> If you take 20 shots in basketball, and each has 0.3 probability of succeeding, and if these shots are independent of each other (that is, success in one shot is not associated with an increase or decrease in the probability of success for any other shot), then the number of shots that succeed is said to have a *binomial distribution* with $n = 20$ and $p = 0.3$, for which we use the notation $y \sim \operatorname{binomial}(n, p)$. (p. 43, *emphasis* in the original)
+
+You can take random draws from a a given $\operatorname{binomial}(n, p)$ distribution with the `rbinom()` function.
+
+```{r}
+set.seed(3)
+
+n <- 20
+p <- .3
+
+rbinom(n = 1, size = n, prob = p)
+```
+
+For this one draw from $\operatorname{binomial}(20, .3)$, we got four successful shots. Here's what it'd look like if we repeated this experiment 1,000 times.
+
+```{r, fig.width = 3, fig.height = 2.25}
+set.seed(3)
+
+d <-
+  tibble(successes = rbinom(n = 1000, size = n, prob = p)) 
+
+d %>% 
+  ggplot(aes(x = successes)) +
+  geom_bar() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(1000~draws~from~binomial(italic(n)==20*","*~italic(p)==.3))) +
+  coord_cartesian(xlim = c(0, 20)) +
+  theme(plot.title.position = "plot")
+```
+
+The mean for the binomial distribution is $np$ and the standard deviation is $\sqrt{np(1-p)}$. For our example, above, that would predict
+
+$$
+\text{mean} = 20 \times .3 = 6 \;\;\; \text{and} \\
+\text{standard deviation} = \sqrt{20 \times .3(1 - .3)} = 2.04939.
+$$
+
+We can verity that in **R**.
+
+```{r}
+n*p
+sqrt(n*p*(1-p))
+```
+
+Our sample approximations are pretty close.
+
+```{r}
+d %>% 
+  summarise(mean = mean(successes),
+            sd = sd(successes))
+```
+
+### 3.5.7 Poisson distribution.
+
+"The *Poisson distribution* is used for count data" (p. 44, *emphasis* in the original). The Poisson has one parameter, $\lambda$, which defies both the mean and variance. You can take random draws from a Poisson of a given $\lambda$ with the `rpois()` function. For example, here we take a single draw from $\operatorname{Poisson}(\lambda = 4.52)$.
+
+```{r}
+set.seed(3)
+
+rpois(n = 1, lambda = 4.52)
+```
+
+Here's what it'd look like if we did that 1,000 times.
+
+```{r, fig.width = 3, fig.height = 2.25}
+set.seed(3)
+
+d <-
+  tibble(number = rpois(n = 1000, lambda = 4.52)) 
+
+d %>% 
+  ggplot(aes(x = number)) +
+  geom_bar() +
+  scale_x_continuous("number of cancers per year", 
+                     expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(1000~draws~from~Poisson(lambda==4.52))) +
+  theme(plot.title.position = "plot")
+```
+
+Here's what the distribution would look like for an average rate of 380 hits per hour, given 1,000 draws.
+
+```{r, fig.width = 3, fig.height = 2.25}
+set.seed(3)
+
+tibble(number = rpois(n = 1000, lambda = 380)) %>% 
+  ggplot(aes(x = number)) +
+  geom_bar() +
+  scale_x_continuous("380 hits per hour") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(1000~draws~from~Poisson(lambda==380))) +
+  theme(plot.title.position = "plot")
+```
+
+If you and I tend to "know approximately 750 people, and 1% of all people in the population are named Michael," here's the distribution of Michaels we'd know (p. 44).
+
+```{r, fig.width = 3, fig.height = 2.25}
+set.seed(3)
+
+tibble(number = rpois(n = 1000, lambda = 750 * .01)) %>% 
+  ggplot(aes(x = number)) +
+  geom_bar() +
+  scale_x_continuous("# of Michaels you know", expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(1000~draws~from~Poisson(lambda==7.5))) +
+  theme(plot.title.position = "plot")
+```
+
+### 3.5.8 Unclassified probability distributions.
+
+> Real data will not in general correspond to any named probability distribution... That is fine. Catalogs of named distributions are a starting point in understanding probability but they should not bound our thinking. (p. 44)
+
+### 3.5.9 Probability distributions for error.
+
+> Above we have considered distributions for raw data. But in regression modeling we typically model as much of the data variation as possible with a *deterministic* model, with a probability distribution included to capture the *error*, or unexplained variation. A simple and often useful model for continuous data is $y = \text{deterministic_part} + \text{error}$. A similar model for continuous positive data is $y = \text{deterministic_part} * \text{error}$. (p. 44, *emphasis* in the original)
+
+### 3.5.10 Comparing distributions.
+
+"We typically compare distributions using summaries such as the mean, but it can also make sense to look at shifts in quantiles" (p. 45).
+
+Here's our version of Figure 3.9.
+
+```{r, fig.width = 5, fig.height = 2.75}
+tibble(time = 0:1000) %>%
+  mutate(control = dnorm(time, mean = 510, sd = 190),
+         treated = dnorm(time, mean = 510 + 20, sd = 190)) %>% 
+  pivot_longer(-time) %>% 
+  
+  ggplot(aes(x = time, y = value, group = name, color = name)) +
+  geom_line() +
+  scale_color_grey(start = .6, end = 0, breaks = NULL) +
+  annotate(geom = "text",
+           x = c(325, 710), y = 0.0015,
+           label = c("Controls", "Treated"),
+           color = c("grey40", "black"),
+           hjust = c(1, 0)) +
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  xlab("Exercise time (seconds)")
+```
+
+> The treatment effect was estimated as 20 seconds... Take a person at the median of the distribution, with an exercise time of 510 seconds under the control and an expected 530 seconds under the treatment. This corresponds to a shift from the 50^th^ to the 54^th^ percentile of the distribution. We compute these probabilities in **R** like this: `pnorm(c(510, 530), 510, 190)`. (p. 45, **emphasis** added)
+
+```{r}
+pnorm(c(510, 530), 510, 190)
+```
+
+## 3.6 Probability modeling
+
+> What is the probability that your vote is decisive in an election? No dice, coins, or other randomization devices appear here, so any answer to this question will require assumptions. We use this example to demonstrate the challenges of probability modeling, how it can work, and how it can go wrong.
+>
+> Consider an election with two candidates and $n$ voters. An additional vote will be potentially decisive if all the others are divided equally (if $n$ is even) or if the preferred candidate is otherwise one vote short of a tie (if $n$ is odd).
+>
+> We consider two ways of estimating this probability: an empirical forecasting approach that we recommend, and a binomial probability model that has serious problems. (p. 45)
+
+### 3.6.1 Using an empirical forecast.
+
+> Suppose an election is forecast to be close. Let $y$ be the proportion of the vote that will be received by one of the candidates, and suppose we can summarize our uncertainty in $y$ by a normal distribution with mean 0.49 and standard deviation 0.04 (p. 45)
+
+Here's what that looks like in a plot.
+
+```{r, fig.width = 5, fig.height = 2.75}
+tibble(p = seq(from = 0, to = 1, by = .001)) %>% 
+  mutate(d = dnorm(p, mean = .49, sd = .04)) %>% 
+  
+  ggplot(aes(x = p, y = d)) +
+  geom_vline(xintercept = .5, linetype = 2, color = "grey50") +
+  geom_line() +
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  xlab("probability the candidate will win")
+```
+
+> The probability that the $n$ votes are exactly split if $n$ is even, or that they are one vote less than being split if $n$ is odd, can then be approximated as $1/n$ times the forecast vote share density evaluated at 0.5. (p. 46)
+
+Given an election with 200,000 votes, we can use `dnorm()` to compute the probability of an exact split.
+
+```{r}
+dnorm(0.5, mean = 0.49, sd = 0.04) / 2e5
+```
+
+This is about 1 in 21,000.
+
+> This is a low probability for an individual voter; however it is not so low for a campaign. For example, if an additional 1000 voters could be persuaded to turn out for your candidate, the probability of *this* being decisive is the probability of the election being less than 1000 votes short of a tie. (p. 46, *emphasis* in the original)
+
+We can compute this by multiplying the code above by `1000`.
+
+```{r}
+1000 * dnorm(0.5, mean = 0.49, sd = 0.04) / 2e5
+```
+
+That's about 1 in 21. 
+
+> If no election-specific forecast is available, one can use a more generic probability model based on the distribution of vote shares in candidates in some large set of past elections. For example, the normal distribution with mean 0.5 and standard deviation 0.2 corresponds to a forecast that each candidate is likely to get somewhere between 30% and 70% of the vote. (p. 46)
+
+Here's what that looks like in a plot.
+
+```{r, fig.width = 5, fig.height = 2.75}
+tibble(p = seq(from = 0, to = 1, by = .001)) %>% 
+  mutate(d = dnorm(p, mean = .5, sd = .2)) %>% 
+  
+  ggplot(aes(x = p, y = d)) +
+  geom_vline(xintercept = .5, linetype = 2, color = "grey50") +
+  geom_line() +
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  xlab("generic probability the candidate will win")
+```
+
+Using the same procedure from a couple code block up, here's the updated probability of a tie in an election of 200,000 voters.
+
+```{r}
+dnorm(0.5, mean = .5, sd = .2) / 2e5
+```
+
+That's about 1 in 100,000.
+
+### 3.6.2 Using an reasonable-seeming but inappropriate probability model.
+
+> We next consider an alternative calculation that we have seen but which we do not think makes sense. Suppose there are $n$ voters, each with probability $p$ of voting for a particular candidate. Then the probability of an exact tie, or one vote short of a tie, can be computed using the binomial distribution. (p. 46)
+
+Given an election with 200,000 voters and $p = .5$, one might compute the probability of an election tie with the `dbinom()` function.
+
+```{r}
+dbinom(1e5, size = 2e5, prob = .5)
+```
+
+That's about 1 in 560. Here's what happens for $p = .49$
+
+```{r}
+dbinom(1e5, size = 2e5, prob = .49)
+```
+
+That's about $10^{-20}$, a very small number.
+
+> What went wrong? Most directly, the binomial model does not apply here. This distribution represents the number of successes in $n$ independent trials, each with probability $p$. But voters are not making their decisions independently--they are being affected by common factors such as advertising, candidates' statements, and other news. In addition, voters do not have a shared probability $p$. Some voters are almost certainly going to choose one candidate, others are almost certainly on the other side, and voters in the middle have varying leanings. (p. 46)
+
+### 3.6.3 General lessons for probability modeling.
+
+"Probability modeling is a powerful tool in part because when it goes wrong we can use this failure to improve our understanding" (p. 47).
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+

@@ -1,0 +1,441 @@
+---
+title: "Chapter 6: Background on regression modeling"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Background on regression modeling
+
+"At a purely mathematical level, the methods described in this book have two purposes: prediction and comparison" (p. 81)
+
+## 6.1 Regression models
+
+The basic univariate univariable regression model follows the form
+
+$$y = a + bx + \text{error},$$
+
+where $y$ is the criterion, $x$ is the predictor, $a$ is the intercept, $b$ is the slope, $a$ and $b$ are the coefficients, and $\text{error}$ is the variability in $y$ not captured by the linear model. By convention, $\text{error} \sim \operatorname{Normal}(0, \sigma)$.
+
+We can expand to a multivariable model (i.e., one with multiple predictor variables) with $K$ predictors,
+
+$$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \cdots + \beta_k x_k + \text{error},$$
+
+which we might express in vector-matrix notation as $y = X \beta + \text{error}$.
+
+We can write nonlinear models might be expressed in any number of ways, such as
+
+$$\log y = a + b \log x + \text{error}.$$
+
+We can write non-additive interaction models as
+
+$$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_1 x_2 + \text{error},$$
+
+where the coefficient $\beta_3$ is multiplied by the *interaction term*, $x_1 x_2$.
+
+Generalized linear models expand our abilities from modeling simple continuous variables with Gaussian error distributions to other kinds of data, such as binary, nominal, ordered categorical, counts, and so on.
+
+## 6.2 Fitting a simple regression to fake data
+
+Rather than **rstanarm**, we'll be using **brms**, which also uses the Stan statistical inference engine under the hood.
+
+```{r, warning = F, message = F}
+library(brms)
+```
+
+Now simulate $y_i$ for $n = 20$ cases, based on the model $y_i = a + b x_i + \epsilon_i$, where $x_i$ takes on integers ranging from 1 to 20. 
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+a <- 0.2
+b <- 0.3
+sigma <- 0.5
+
+set.seed(6)
+
+d <-
+  tibble(x = 1:20) %>% 
+  mutate(y = a + b * x + sigma * rnorm(n(), mean = 0, sd = 1))
+
+d
+```
+
+
+
+```{r, eval = F, echo = F}
+# if you run this code, you'll see our tidyverse way of 
+# simulating the data produces the same results as the code
+# from the text.
+
+set.seed(6)
+
+x <- 1:20
+n <- length(x)
+a <- 0.2
+b <- 0.3
+sigma <- 0.5
+y <- a + b*x + sigma*rnorm(n)
+
+d %>% 
+  rbind(data.frame(x, y)) %>% 
+  mutate(sim = rep(c("tidyverse", "base R"), each = 20)) %>% 
+  
+  ggplot(aes(x, y, color = sim, shape = sim, size = sim)) +
+  geom_point() +
+  scale_shape_manual(values = c(1, 2))
+```
+
+### 6.2.1 Fitting a regression and displaying the results.
+
+We've already saved our data in a tibble called `d`. If you want, you can rename it `fake`, like so.
+
+```{r, eval = F}
+fake <- d
+```
+
+If we rely heavily on the default settings, we can fit the simple linear model with `brms::brm()` in one line of code.
+
+```{r m6.1, echo = F}
+# save(m6.1, file = "fits/m06.01.rda")
+# rm(m6.1)
+load("fits/m06.01.rda")
+```
+
+```{r, eval = F}
+m6.1 <- brm(data = d, y ~ x)
+```
+
+The `print()` function will summarize the results.
+
+```{r}
+print(m6.1)
+```
+
+The `summary()` function yields the same results. If you desire to summarize the location with the median and the spread with the mad sd, you can set `robust = TRUE`.
+
+```{r}
+print(m6.1, robust = T)
+```
+
+We can also extract the summaries for the $a$ and $b$ coefficients using the `fixef()` functions, wich will be our analogue to the `coef()` function used in the text.
+
+```{r}
+fixef(m6.1)
+```
+
+Now use those skills to make Figure 6.1.
+
+```{r, warning = F, fig.width = 4.5, fig.height = 3.25}
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+d %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_abline(intercept = fixef(m6.1)[1, 1], slope = fixef(m6.1)[2, 1]) +
+  geom_point() +
+  annotate(geom = "text",
+           x = 14, y = 3.5,
+           label = expression(y==0.25+0.30*x)) +
+  labs(subtitle = "Data and fitted regression line")
+```
+
+### 6.2.2 Comparing estimates to assumed parameter values.
+
+Here we make our version of the table in Figure 6.2.
+
+```{r}
+posterior_summary(m6.1, robust = T)[1:3, 1:2] %>% 
+  round(digits = 2) %>% 
+  data.frame() %>% 
+  rename(Uncertainty = Est.Error) %>% 
+  mutate(Parameter = c("a", "b", "sigma")) %>% 
+  mutate(`Assumed value` = map_dbl(Parameter, get)) %>% 
+  select(Parameter, `Assumed value`, Estimate, Uncertainty)
+```
+
+## 6.3 Interpret coefficients as comparisons, not effects
+
+Load the `earnings.csv` data.
+
+```{r, message = F}
+earnings <- 
+  read_csv("ROS-Examples-master/Earnings/data/earnings.csv") %>% 
+  mutate(earnk = earn / 1000)
+
+glimpse(earnings)
+```
+
+This time we'll add a couple more arguments to the `brm()` function. The `seed` argument will make the results more reproducible and the `file` argument will automatically save the fit as an external file.
+
+```{r m6.2}
+m6.2 <-
+  brm(data = earnings,
+      earnk ~ height + male,
+      seed = 6,
+      file = "fits/m06.02")
+```
+
+Check the summary.
+
+```{r}
+print(m6.2, robust = T, digits = 1)
+```
+
+Rounding and ignoring the estimate for $\epsilon$, we can use this to express the linear model as
+
+$$\text{earnk}_i = -26.2 + 0.7 \times \text{height}_i + 10.6 \times \text{male}_i + \text{error}.$$
+
+The 'Estimate' for sigma in our `print()` output, 21.4, suggests the `earnk` values wll be within $\pm$ 21.4 of the linear predictions about 68% of the time and within $\pm$ of $2 \times 21.4 = 42.8$ of the linear predictions about 95% of the time. We get those percentiles based on the conventional assumption $\epsilon_i \sim \mathcal N(0, \sigma)$.
+
+The **brms** package does not have a `sigma()` function. If you want to pull the point estimate for $\sigma$, it'll probably be easiest to use `posterior_summary()`.
+
+```{r}
+posterior_summary(m6.2, robust = T)["sigma", 1]
+```
+
+We can use that to get the point estimate for $R^2$.
+
+```{r}
+1 - posterior_summary(m6.2, robust = T)["sigma", 1]^2 / sd(earnings$earnk)^2
+```
+
+## 6.4 Historical origins of regression
+
+> "Regression" is defined in the dictionary as "the process or an instance of regressing, as to a less perfect or less developed state." How did this term come to be used for statistical prediction? This connection comes from Francis Galton, one of the original quantitative social scientists, who fit linear models to understand the heredity of human height. Predicting children's heights from parent's heights, he noticed that children of tall parents tended to be taller than average but less tall than their parents. From the other direction, children of shorter parents tended to be shorter than average but less short than their parents. Thus, from one generation to the next, people's heights have "regressed" to the average or *mean*, in statistics jargon. (p. 85, *emphasis* in the original)
+
+### 6.4.1 Daughters' heights "regressing" to the mean.
+
+Load the `Heights.txt` data, collected by Pearson and Lee in 1903.
+
+```{r, message = F}
+heights <- 
+  read_table2("ROS-Examples-master/PearsonLee/data/Heights.txt") %>% 
+  set_names("daughter_height", "mother_height")
+
+glimpse(heights)
+```
+
+We'll visualize the data and a quick linear model in our version of Figure 6.3a. Because the data were only recorded to the first decimal point, we'll have to jitter them a little to avoid overplotting.
+
+```{r, message = F, fig.width = 3.5, fig.height = 3.5}
+heights %>% 
+  ggplot(aes(x = mother_height, y = daughter_height)) +
+  geom_jitter(size = 1/10, alpha = 1/2) +
+  stat_smooth(method = "lm", se = F) +
+  geom_point(data = . %>% 
+               summarise(mother_height = mean(mother_height),
+                         daughter_height = mean(daughter_height)),
+             color = "white", fill = "blue",
+             shape = 21, size = 4, stroke = 1/4) +
+  labs(subtitle = "Mothers' and daughters' heights,\naverage of data, and fitted regression line",
+       x = "Mother's height (inches)",
+       y = "Adult daughter's height (inches)")
+```
+
+When using the `stat_smooth(method = "lm")` method, you use the OLS `lm()` function to fit the line. Here are the results of that model.
+
+```{r}
+lm(data = heights,
+   daughter_height ~ mother_height)
+```
+
+Also, you may have noticed our tricky code in `geom_point(data = . %>% summarise(mother_height = mean(mother_height), daughter_height = mean(daughter_height)))`. That's how we ploted the grand mean for the two variables. Here are those values.
+
+```{r}
+heights %>% 
+  summarise(mother_height   = mean(mother_height), 
+            daughter_height = mean(daughter_height))
+```
+
+Now we're ready to make our version of Figure 6.3b.
+
+```{r, message = F, warning = F, fig.width = 3.5, fig.height = 3.5}
+# to mark the line grand mean
+lines <- 
+  tibble(mother_height = c(62.5, 62.5, -Inf),
+         daughter_height = c(-Inf, 63.9, 63.9))
+
+# compute the dot
+heights %>% 
+  summarise(mother_height   = mean(mother_height), 
+            daughter_height = mean(daughter_height)) %>%
+  
+  # plot!
+  ggplot(aes(x = mother_height, y = daughter_height)) +
+  geom_point(color = "blue", size = 3) +
+  geom_abline(intercept = 29.7984, slope = 0.5449,
+              color = "blue") +
+  geom_path(data = lines,
+            size = 1/5, linetype = 3) +
+  annotate(geom = "text",
+           x = c(67, 62.5), y = c(63.9, 61.5),
+           label = c(expression(y==30+0.54*x),
+                     expression("Equivalently, "*y==63.9+0.54%.%(x-62.5)))) +
+  scale_x_continuous(breaks = c(54, 60, 62.5, 66, 72), labels = c("54", "60", 62.5, "66", "72")) +
+  scale_y_continuous(breaks = c(54, 60, 63.9, 66, 72), labels = c("54", "60", 63.9, "66", "72")) +
+  coord_cartesian(xlim = c(52, 74),
+                  ylim = c(52, 74)) +
+  labs(subtitle = "The fitted regression line and the average\nof the data",
+       x = "Mother's height (inches)",
+       y = "Adult daughter's height (inches)") +
+  theme(axis.text.y = element_text(hjust = 0))
+```
+
+To get a better sense of what the intercept and slope mean, we'll make Figure 6.4.
+
+```{r, fig.width = 7.5, fig.height = 3.25}
+# left
+p1 <-
+  heights %>%
+  ggplot(aes(x = mother_height, y = daughter_height)) +
+  geom_abline(intercept = 29.7984, slope = 0.5449,
+              color = "blue") +
+  annotate(geom = "text",
+           x = 40, y = 40,
+           label = "slope 0.54") +
+  scale_x_continuous(NULL, breaks = 0, 
+                     expand = c(0, 0), limits = c(0, 100)) +
+  scale_y_continuous(NULL, breaks = c(0, 30), 
+                     expand = c(0, 0), limits = c(0, 100)) +
+  labs(subtitle = expression("The line, "*y==30+0.54*x)) +
+  theme(axis.text.y = element_text(hjust = 0))
+
+# right
+p2 <-
+  heights %>% 
+  ggplot(aes(x = mother_height, y = daughter_height)) +
+  geom_jitter(size = 1/20, alpha = 1/2) +
+  geom_abline(intercept = 29.7984, slope = 0.5449,
+              color = "blue") +
+  geom_path(data = lines,
+            size = 1/5, linetype = 3, color = "grey50") +
+  annotate(geom = "text",
+           x = 40, y = 40,
+           label = "slope 0.54") +
+  scale_x_continuous(NULL, breaks = c(0, 62.5), labels = c("0", 62.5), 
+                     expand = c(0, 0), limits = c(0, 100)) +
+  scale_y_continuous(NULL, breaks = c(0, 30, 63.9), labels = c("0", "30", 63.9), 
+                     expand = c(0, 0), limits = c(0, 100)) +
+  labs(subtitle = expression("The line, "*y==30+0.54*x*", in the context of the data")) +
+  theme(axis.text.y = element_text(hjust = 0))
+
+# combine
+library(patchwork)
+p1 + p2
+```
+
+### 6.4.2 Fitting the model in R [via brms].
+
+We've already fit the model with `lm()`. Now we'll use `brms::brm()`.
+
+```{r m6.3}
+m6.3 <-
+  brm(data = heights,
+      daughter_height ~ mother_height,
+      seed = 6,
+      file = "fits/m06.03")
+```
+
+Check the summary.
+
+```{r}
+print(m6.3, robust = T)
+```
+
+If you look at the fourth line of the `print()` output, you can see the data were of 5,524 mother-daughter pairs. We've already gone through the efforts of making variants of Figure 6.3 using `lm()` output. The basic steps are the same when using `brm()` output. Another quick option is to use the `conditional_effects()` function, which we can then feed into `plot()`.
+
+```{r, message = F, warning = F, fig.width = 3.5, fig.height = 3.5}
+conditional_effects(m6.3) %>% 
+  plot(points = T,
+       point_args = list(width = 0.45, height = 0.45, size = 1/10))
+```
+
+## 6.5 The paradox of regression to the mean
+
+> The *predicted* height of a woman is closer to the average, compared to her mother's height, but the actual height is not the same thing as the prediction, which has error; recall equation (6.1). The point predictions regress toward the mean--that's the coefficient less than 1--and this reduces variation. At the same time, though, the error in the model--the imperfection of the prediction--*adds* variation, just enough to keep the total variation in height roughly constant from one generation to the next.
+>
+> Regression to the mean thus will always arise in some form whenever predictions are imperfect in a stable environment. The imperfection of the prediction induces variation, and regression in the point prediction is required in order to keep the total variation constant. (p. 88, *emphasis* in the original)
+
+That is, the paradox around regression to the mean is only a paradox when people focus too much on the mean structure of the model and ignore the variability around the mean. Consider when we simulate data using the `rnorm()` function. The shape of the resulting distribution is controlled primarily by the `mean` AND `sd` parameters. *Don't for get the standard deviation*.
+
+### 6.5.1 How regression to the mean can confuse people about causal inference; demonstration using fake data.
+
+Simulate the `exams` data.
+
+```{r}
+# how many would you like?
+n <- 1000
+
+set.seed(6)
+
+exams <-
+  tibble(true_ability = rnorm(n, mean = 50, sd = 10),
+         noise_1      = rnorm(n, mean = 0, sd = 10),
+         noise_2      = rnorm(n, mean = 0, sd = 10)) %>% 
+  mutate(midterm = true_ability + noise_1,
+         final   = true_ability + noise_2)
+
+head(exams)
+```
+
+Fit the model.
+
+```{r m6.4}
+m6.4 <-
+  brm(data = exams,
+      final ~ midterm,
+      seed = 6,
+      file = "fits/m06.04")
+```
+
+Check the model summary.
+
+```{r}
+print(m6.4, robust = T)
+```
+
+Make our version of Figure 6.5 using `conditional_effects()`.
+
+```{r, message = F, warning = F, fig.width = 3.5, fig.height = 3.5}
+ce <- conditional_effects(m6.4)
+
+plot(ce,
+     points = T,
+     point_args = list(size = 1/10),
+     plot = F)[[1]] +
+  scale_x_continuous("Midterm exam score", limits = c(0, 100), expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("Final exam score", limits = c(0, NA), expand = expansion(mult = c(0, 0.05)))
+```
+
+### 6.5.2 Relation of “regression to the mean” to the larger themes of the book.
+
+"The regression fallacy described above is a particular example of a misinterpretation of a comparison. The key idea is that, for causal inference, you should compare like with like" (p. 90).
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
