@@ -18,7 +18,9 @@ knitr::opts_chunk$set(fig.align = "center")
 
 # Assumptions, diagnostics, and model evaluation
 
+"In this chapter we turn to the assumptions of the regression model, along with diagnostics that can be used to assess whether some of these assumptions are reasonable" (p. 153)
 
+## 11.1 Assumptions of regression analysis
 
 
 
