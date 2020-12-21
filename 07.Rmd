@@ -1,0 +1,590 @@
+---
+title: "Chapter 7: Linear regression with a single predictor"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Linear regression with a single predictor
+
+> As discussed in Chapter 1, regression is fundamentally a technology for predicting an outcome y from inputs $x_1, x_2, \dots$ . In this chapter we introduce regression in the simple (but not trivial) case of a linear model predicting a continuous $y$ from a single continuous $x$, thus fitting the model $y_i = a + b x_i + \text{error}$ to data $(x_i, y_i), i = 1, \dots ,n$. (p. 93)
+
+## 7.1 Example: predicting presidential vote share from the economy
+
+### 7.1.1 Fitting a linear model to data.
+
+Load the `hibbs.dat` data.
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+hibbs <- 
+  read_table2("ROS-Examples-master/ElectionsEconomy/data/hibbs.dat") %>%
+  mutate(inc_party_candidate = str_remove_all(inc_party_candidate, '[\"]'),
+         other_candidate     = str_remove_all(other_candidate, '[\"]'))
+
+hibbs
+```
+
+Plot the two focal variables, `growth` and `vote`, to make our version of the left panel of Figure 7.2.
+
+```{r, warning = F, fig.width = 3.75, fig.height = 3.25}
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+hibbs %>% 
+  ggplot(aes(x = growth, y = vote, label = year)) +
+  geom_hline(yintercept = 50, color = "grey75", size = 1/4) +
+  geom_text(size = 3) +
+  scale_x_continuous("Average recent growth in personal income", labels = function(x) str_c(x, "%")) +
+  scale_y_continuous("Incumbent party's vote share", labels = function(x) str_c(x, "%")) +
+  labs(subtitle = "Forecasting the election from the economy")
+```
+
+Load **brms** and fit the model with `brm()`.
+
+```{r m7.1, warning = F, message = F}
+library(brms)
+
+m7.1 <-
+  brm(data = hibbs,
+      vote ~ growth,
+      seed = 7,
+      file = "fits/m07.01")
+```
+
+### 7.1.2 Understanding the fitted model.
+
+Check the model summary.
+
+```{r}
+print(m7.1, robust = T)
+```
+
+"In this example, `vote` is the outcome and `growth` is the predictor. By default the fit includes an intercept term: the line is $y = a + bx$, not simply $y = bx$" (p. 95). Using a little rounding, we can insert the posterior medians for the two coefficient to rewrite the equation as
+
+$$y = 46.2 + 3.1 x.$$
+
+On page 95, Gelman and colleagues pointed out that if you wanted to use `stan_glm()` to fit this model with no intercept, you'd execute `stan_glm(vote ~ -1 + growth, data = hibb)`, where the `-1` part of the syntax instructs the software to drop the intercept. The **brms** package follows this same rule. Just for kicks, let's fit the no-intercept model.
+
+```{r m7.1b, warning = F, message = F}
+m7.1b <-
+  brm(data = hibbs,
+      vote ~ -1 + growth,
+      seed = 7,
+      file = "fits/m07.01b")
+```
+
+Check the summary.
+
+```{r}
+print(m7.1b, robust = T)
+```
+
+Yep, there's no intercept, there. We only have a $\beta$ coefficient for `growth` and an estimate for the residual standard deviation, $\sigma$.
+
+Circling back to the text, lower down on page 95, the authors considered what the model would predict for a scenario like the election in 2008. Shortly before the election, the economic growth was about 0.1%. We could use that value along with a couple `fixef()` statements to return the expected value in `vote`, based on our linear model `m7.1`.
+
+```{r}
+100 - (fixef(m7.1, robust = T)[1, 1] + fixef(m7.1, robust = T)[2, 1] * 0.1)
+```
+
+Our model returned $y = 46.5$, which translates into an expected value of 46.5% of the popular vote going to the incumbent party, which was the Republican party in 2008. Conversely, this also predicts 53.5% of the vote would go to the Democrat Barack Obama.
+
+### 7.1.3 Graphing the fitted regression line.
+
+Now we'll make Figure 7.2b by adding in the fitted line by extracting the intercept and slope medians with `fixef()` and pumping them into the `intercept` and `slope` arguments in `geom_abline()`.
+
+```{r, warning = F, fig.width = 3.75, fig.height = 3.25}
+hibbs %>% 
+  ggplot(aes(x = growth, y = vote, label = year)) +
+  geom_hline(yintercept = 50, color = "grey75", size = 1/4) +
+  geom_point() +
+  geom_abline(intercept = fixef(m7.1, robust = T)[1, 1], slope = fixef(m7.1, robust = T)[2, 1],
+              size = 1/3) +
+  annotate(geom = "text",
+           x = 3.5, y = 53.5,
+           label = expression(y==46.2+3.1*x)) +
+  scale_x_continuous("Average recent growth in personal income", labels = function(x) str_c(x, "%")) +
+  scale_y_continuous("Incumbent party's vote share", labels = function(x) str_c(x, "%")) +
+  labs(subtitle = "Data and linear fit")
+```
+
+### 7.1.4 Using the model to predict.
+
+Now consider what the model would predict for the 2016 election. At the time, the Democrats were the incumbents and Hillary Clinton was the Democratic candidate. The economic grows over the previous four years was about 2%. Here is the expected value.
+
+```{r}
+fixef(m7.1, robust = T)[1, 1] + fixef(m7.1, robust = T)[2, 1] * 2
+```
+
+Imagine a normal distribution with that value defining the $\mu$ parameter and the error term from `m7.1` as defining the $\sigma$ parameter. We can then plot a probability distribution of the model's forecast, which will be our version of Figure 7.3.
+
+```{r, fig.width = 5, fig.height = 3.25}
+# Gaussian parameters
+mu <- fixef(m7.1, robust = T)[1, 1] + fixef(m7.1, robust = T)[2, 1] * 2
+sigma <- VarCorr(m7.1)$residual__$sd[1]
+
+# data points
+tibble(x = seq(from = 37, to = 68, by = 0.01)) %>%
+  mutate(d = dnorm(x, mean = mu, sd = sigma)) %>% 
+  
+  # plot!
+  ggplot(aes(x = x, y = d, ymin = 0, ymax = d)) +
+  geom_ribbon(data = . %>% filter(x >= 50),
+              fill = "grey75") +
+  geom_line() +
+  annotate(geom = "text",
+           x = 51, y = .025,
+           label = "Predicted\n72% chance\nof Clinton victory",
+           hjust = 0) +
+  scale_x_continuous("Clinton share of the two−party vote", 
+                     breaks = 8:13 * 5, labels = function(x) str_c(x, "%")) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Probability forecast of Hillary Clinton vote share in 2016,\nbased on 2% rate of economic growth")
+```
+
+Here's how we get the 72% chance estimate, from.
+
+```{r}
+1 - pnorm(50, mean = mu, sd = sigma)
+```
+
+## 7.2 Checking the model-fitting procedure using fake-data simulation
+
+"It is good practice to check our fits by performing them under controlled conditions where we know the truth. We demonstrate here with the election model" (p. 97).
+
+### 7.2.1 Step 1: Creating the pretend world.
+
+Here we set the parameters based on the model we just fit. Due to simulation variance, our estimates a tiny bit different from those reported in the text. Here we'll set our simulation parameters based on those Gelman and colleagues reported on page 97.
+
+```{r}
+a <- 46.3
+b <- 3.0
+sigma <- 3.9
+x <- hibbs$growth 
+n <- length(x)
+```
+
+### 7.2.2 Step 2: Simulating fake data.
+
+Now simulate the criterion variable, `y`, save the results in a tibble named `fake`, and take a look at the results.
+
+```{r}
+set.seed(7)
+
+fake <-
+  tibble(x = x) %>% 
+  mutate(y = a + b * x + rnorm(n, mean = 0, sd = sigma))
+
+glimpse(fake)
+```
+
+### 7.2.3 Step 3: Fitting the model and comparing fitted to assumed values.
+
+Fit the model with `brms::brm()`
+
+```{r m7.2, warning = F, message = F}
+m7.2 <-
+  brm(data = fake,
+      y ~ x,
+      seed = 7,
+      file = "fits/m07.02")
+```
+
+Check the output summary.
+
+```{r}
+print(m7.2, robust = T)
+```
+
+Due to simulation variance, our results are a little different from those in the text. But they're pretty close to the true data-generating values, at least within the margin of error. The data are compored of only 16 cases, after all.
+
+```{r}
+a
+b
+sigma
+```
+
+If we save the posterior median and mad sd for the `x` slope, we can use them to formally assess how close our estimate is to the true data generating value.
+
+```{r}
+b_hat <- fixef(m7.2, robust = T)["x", "Estimate"] 
+b_se  <- fixef(m7.2, robust = T)["x", "Est.Error"] 
+```
+
+Was the difference between `b` and `b_hat` within one standard error of the true value?
+
+```{r}
+abs(b - b_hat) < b_se
+```
+
+Nope, it was more than one standard error away, which is like saying it was outside of the 68% confidence interval. How about two standard errors?
+
+```{r}
+abs(b - b_hat) < b_se * 2
+```
+
+Yep, the true value `b` was within 2 standard errors (i.e., within the 95% confidence interval) of the posterior median.
+
+### 7.2.4 Step 4: Embedding the simulation in a loop.
+
+Instead of using a `for` loop, we will run many iterations of the simulation within the `purrr::map()` paradigm. First, we'll define a custom function to generate the data, fit the model, and check the coverage.
+
+```{r}
+simulate_coverage <- function(seed) {
+  
+  # define the true values
+  a <- 46.3
+  b <- 3.0
+  sigma <- 3.9
+  x <- hibbs$growth 
+  n <- length(x)
+  
+  # simulate the data
+  set.seed(seed)
+  
+  fake <-
+    tibble(x = x) %>% 
+    mutate(y = a + b * x + rnorm(n, mean = 0, sd = sigma))
+  
+  # fit the model
+  fit <-
+    update(m7.2,
+           newdata = fake,
+           y ~ x,
+           seed = seed)
+  
+  # extract the slope info
+  b_hat <- fixef(fit, robust = T)["x", "Estimate"] 
+  b_se  <- fixef(fit, robust = T)["x", "Est.Error"] 
+  
+  # compute the coverage
+  cover <-
+    tibble(cover_68 = abs(b - b_hat) < b_se,
+           cover_95 = abs(b - b_hat) < b_se * 2)
+  
+  return(cover)
+  
+}
+```
+
+To warm up, well use our `simulate_coverage()` function for a single iteration.
+
+```{r, warning = F, message = F, results = "hide"}
+sim <- simulate_coverage(seed = 1)
+```
+
+Here's what it contains.
+
+```{r}
+sim
+```
+
+For this particular iteration of the simulation, we passed both kinds of coverage. Now we'll iterate many more times using `purrr::map()`.
+
+```{r sim_07.01, echo = F}
+# save(list = c("n_fake", "t1", "t2", "sim1"), file = "sims/sim_07.01.rda")
+load("sims/sim_07.01.rda")
+```
+
+```{r, eval = F}
+# how many would you like?
+n_fake <- 1000
+
+t1 <- Sys.time()
+
+sim1 <-
+  tibble(seed = 1:n_fake) %>% 
+  mutate(cover = map(seed, simulate_coverage))
+
+t2 <- Sys.time()
+```
+
+Did you notice the two `Sys.time()` lines? If we subtract `t1` from `t2`, we'll see how long the simulation took on my laptop.
+
+```{r}
+t2 - t1
+```
+
+It took about `r as.double(round(t2 - t1, 1))` minutes on my 2019 laptop to run this simulation, which used `brms::brm()` default settings, 1,000 times. The next question is: *What did our `sim1` return?*
+
+```{r}
+head(sim1)
+```
+
+We have a nested tibble where the iterations are indexed by `seed` and results of each are nested within `cover` We can get a look inside the `cover` column with `unnest()`.
+
+```{r}
+sim1 %>% 
+  unnest(cover)
+```
+
+Now we can summarize those results.
+
+```{r}
+sim1 %>% 
+  unnest(cover) %>% 
+  summarise(`68% coverage` = mean(cover_68),
+            `95% coverage` = mean(cover_95))
+```
+
+The coverage for the 95% intervals was near perfect and our coverage for the 68% intervals is even a little high.
+
+Note, again, how each iteration is based on $n = 16$ cases. The $t$ distribution might be a better reference for the 68% and 95% intervals. Let's update our simulation function.
+
+```{r}
+simulate_coverage_t <- function(seed) {
+  
+  # define the true values
+  a <- 46.3
+  b <- 3.0
+  sigma <- 3.9
+  x <- hibbs$growth 
+  n <- length(x)
+  
+  # save the t-values
+  t_68 <- qt(0.840, n - 2) 
+  t_95 <- qt(0.975, n - 2)
+  
+  # simulate the data
+  set.seed(seed)
+  
+  fake <-
+    tibble(x = x) %>% 
+    mutate(y = a + b * x + rnorm(n, mean = 0, sd = sigma))
+  
+  # fit the model
+  fit <-
+    update(m7.2,
+           newdata = fake,
+           y ~ x,
+           seed = seed)
+  
+  # extract the slope info
+  b_hat <- fixef(fit, robust = T)["x", "Estimate"] 
+  b_se  <- fixef(fit, robust = T)["x", "Est.Error"] 
+  
+  # compute the coverage
+  cover <-
+    tibble(cover_68 = abs(b - b_hat) < t_68 * b_se,
+           cover_95 = abs(b - b_hat) < t_95 * b_se)
+  
+  return(cover)
+  
+}
+```
+
+Run the simulation over 1,000 iterations.
+
+```{r sim_07.02, echo = F}
+# save(list = c("n_fake", "t1", "t2", "sim2"), file = "sims/sim_07.02.rda")
+load("sims/sim_07.02.rda")
+```
+
+```{r, eval = F}
+# how many would you like?
+n_fake <- 1000
+
+t1 <- Sys.time()
+
+sim2 <-
+  tibble(seed = 1:n_fake) %>% 
+  mutate(cover = map(seed, simulate_coverage_t))
+
+t2 <- Sys.time()
+```
+
+How long did that take?
+
+```{r}
+t2 - t1
+```
+
+How'd we do?
+
+```{r}
+sim2 %>% 
+  unnest(cover) %>% 
+  summarise(`68% coverage` = mean(cover_68),
+            `95% coverage` = mean(cover_95))
+```
+
+## 7.3 Formulating comparisons as regression models
+
+> To express comparisons as regressions we need the concept of an *indicator variable*, which is a predictor that equals 1 or 0 to indicate whether a data point falls into a specified category. Indicator variables can be used for inputs with two categories (for example, an indicator for "male" that takes on the value 1 for men and 0 for women) or multiple categories (for example, indicators for "White," "Black," and "Hispanic," with each taking on the value of 1 for people in the specified category and zero otherwise). (p. 99, *emphasis* in the original)
+
+### 7.3.1 Estimating the mean is the same as regressing on a constant term.
+
+Simulate 20 cases from $\operatorname{Normal}(2, 5)$.
+
+```{r}
+# how many cases would you like?
+n_0 <- 20
+
+set.seed(7)
+
+y_0 <- rnorm(n_0, mean = 2.0, sd = 5.0)
+
+fake_0 <- tibble(y_0 = y_0) 
+
+glimpse(fake_0)
+```
+
+Compute the sample mean and standard error.
+
+```{r}
+fake_0 %>% 
+  summarise(mean = mean(y_0),
+            se = sd(y_0) / sqrt(n()))
+```
+
+Earlier, we learned that if you want to remove the intercept from a model, you can use the `-1` syntax in the **brms** formula code. If you want to explicitly reference the model intercept in the `formula`, you add a `1`. For example, let's say our simulated data, above, had a single predictor variable called `x`. The `formula` syntax for the simple univariable regression model would be `y_0 ~ 1 + x`, where `1` explicitly refers to the intercept. This would be equivalent to the more thrifty syntax Gelman et al seem to prefer, `y_0 ~ x`. The explicit syntax has two advantages: First, it a can serve as a reminder that the intercept is a fundamental part of most statistical models. Second, it allows one to fit an intercept-only model, a model with no predictor variables.
+
+Now use that knowledge to fit an intercept-only model with `brms::brm()`.
+
+```{r m7.3, warning = F, message = F}
+m7.3 <-
+  brm(data = fake_0,
+      y_0 ~ 1,
+      seed = 7,
+      file = "fits/m07.03")
+```
+
+Check the summary.
+
+```{r}
+print(m7.3, robust = T)
+```
+
+The posterior median and mad sd for the intercept are within simulation variance from the hand-computed mean and standard error.
+
+### 7.3.2 Estimating a difference is the same as regressing on an indicator variable.
+
+Now simulate $n = 30$ from $\operatorname{Normal}(8, 5)$.
+
+```{r}
+set.seed(7)
+
+n_1 <- 30
+y_1 <- rnorm(n_1, mean = 8.0, sd = 5.0)
+```
+
+Compute the difference in the sample means for `y_0` and `y_1`.
+
+```{r}
+mean(y_1) - mean(y_0) 
+```
+
+This is close to the true population difference of 6. Now compute the standard error for that difference.
+
+```{r}
+se_0 <- sd(y_0) / sqrt(n_0) 
+se_1 <- sd(y_1) / sqrt(n_1)
+
+sqrt(se_0^2 + se_1^2)
+```
+
+Bind the two `y_` vectors into a single tibble, with an indicator variable, `x`.
+
+```{r}
+fake <-
+  tibble(x = rep(0:1, times = c(n_0, n_1)),
+         y = c(y_0, y_1))
+
+fake
+```
+
+Our indicator variable is defined as
+
+$$
+x_i = \left \{
+  \begin{array}{@{}ll@{}}
+    0 & \text{if obervation}\ i\ \text{is in group}\ 0 \\
+    1 & \text{if obervation}\ i\ \text{is in group}\ 1.
+  \end{array} \right.
+$$
+
+Now fit the model with the indicator variable `x` as the predictor of `y`. For practice, we'll explicitly reference the intercept in the `formula` syntax.
+
+```{r m7.4, warning = F, message = F}
+m7.4 <-
+  brm(data = fake,
+      y ~ 1 + x,
+      seed = 7,
+      file = "fits/m07.04")
+```
+
+Check the summary.
+
+```{r}
+print(m7.4, robust = T)
+```
+
+The posterior median and mad sd for the `x` coefficient are within simulation variance of our hand-computed difference and standard error, from above.
+
+```{r}
+mean(y_1) - mean(y_0) 
+
+sqrt(se_0^2 + se_1^2)
+```
+
+Make our Figure 7.4.
+
+```{r, fig.width = 3.75, fig.height = 3.25}
+# horizontal lines
+y_bar_0 <- fixef(m7.4, robust = T)[1, 1]
+y_bar_1 <- fixef(m7.4, robust = T)[1, 1] + fixef(m7.4, robust = T)[2, 1]
+
+# annotation
+text <-
+  tibble(x = c(0.1, 0.6, 0.9),
+         y = c(y_bar_0 - 1.5, y_bar_0 + 1.5, y_bar_1 + 1.5),
+         label = c(expression(bar(y)[0]==4.2), 
+                   expression(y==4.2+5.8*x), 
+                   expression(bar(y)[1]==10.0)))
+
+# plot!
+fake %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_hline(yintercept = c(y_bar_0, y_bar_1), 
+             size = 1/4, linetype = 2, color = "grey50") +
+  geom_point(alpha = 1/2) +
+  geom_abline(intercept = fixef(m7.4, robust = T)[1, 1], 
+              slope = fixef(m7.4, robust = T)[2, 1]) +
+  geom_text(data = text,
+            aes(label = label),
+            size = 3, parse = T) +
+  scale_x_continuous("Indicator, x", breaks = 0:1) +
+  labs(subtitle = "Least−squares regression on an indicator is\nthe same as computing a difference in means")
+```
+
+> The point of doing all this using fake-data simulation is, first, to directly check that the direct comparison and the regression give the same answer and, second, to understand the properties of statistical fits using a general tool that will continue to be helpful in more complicated settings. (p. 101)
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
