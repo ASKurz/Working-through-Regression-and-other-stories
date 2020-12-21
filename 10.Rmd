@@ -1,0 +1,1038 @@
+---
+title: "Chapter 10: Linear regression with multiple predictors"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Linear regression with multiple predictors
+
+> As we move from the simple model, $y = a + bx + \text{error}$ to the more general $y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \cdots + \text{error}$, complexities arise, involving choices of what predictors $x$ to include in the model, interpretations of the coefficients and how they interact, and construction of new predictors from existing variables to capture discreteness and nonlinearity. We need to learn how to build and understand models as new predictors are added. (p. 131)
+
+## 10.1 Adding predictors to a model
+
+> Regression coefficients are typically more complicated to interpret with multiple predictors because the interpretation for any given coefficient is, in part, contingent on the other variables in the model. The coefficient $\beta_k$ is the average or expected difference in outcome $y_k$ , comparing two people who differ by one unit in the predictor $x_k$ while being equal in all the other predictors. (p. 131)
+
+### 10.1.1 Starting with a binary predictor.
+
+Load the `kidiq.csv` data, which is a subsample from the [National Longitudinal Survey of Youth](https://www.nlsinfo.org/content/cohorts).
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+kidiq <- read_csv("ROS-Examples-master/KidIQ/data/kidiq.csv")
+
+glimpse(kidiq)
+```
+
+Fit the initial model with `mom_hs` predicting `kid_score` ~ mom_hs`. We'll be using **brms** default priors.
+
+```{r m10.1, warning = F, message = F}
+library(brms)
+
+m10.1 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs,
+      seed = 10,
+      file = "fits/m10.01")
+```
+
+Check the summary.
+
+```{r}
+print(m10.1, robust = T)
+```
+
+We might express the results as
+
+$$\text{kid_score}_i = 77.5 + 11.8 \times \text{mom_hs}_i + \text{error}_i,$$
+
+where $\text{error}_i \sim \mathcal N(0, 19.9)$. We can express the fitted line for that model in our version of Figure 10.1.
+
+```{r, fig.width = 3.25, fig.height = 2.5}
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+kidiq %>% 
+  ggplot(aes(x = mom_hs, y = kid_score)) +
+  geom_jitter(size = 1/4, alpha = 1/2, width = 0.05, height = 0) +
+  geom_abline(intercept = fixef(m10.1, robust = T)[1, 1], 
+              slope = fixef(m10.1, robust = T)[2, 1],
+              size = 1/3) +
+  scale_x_continuous("Mother completed high school", breaks = 0:1) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+```
+
+If you're comfortable working with posterior medians, here's how you might get a quick estimate of the expected value for test scores of the children whose mothers completed high school.
+
+```{r}
+fixef(m10.1, robust = T)[1, 1] + fixef(m10.1, robust = T)[2, 1] * 1
+```
+
+### 10.1.2 A single continuous predictor.
+
+Now fit the alternative model with the single continuous predictor, `mom_iq`.
+
+```{r m10.2, warning = F, message = F}
+m10.2 <-
+  brm(data = kidiq,
+      kid_score ~ mom_iq,
+      seed = 10,
+      file = "fits/m10.02")
+```
+
+Check the summary.
+
+```{r}
+print(m10.2, robust = T)
+```
+
+We might express the results as
+
+$$\text{kid_score}_i = 26.0 + 0.6 \times \text{mom_iq}_i + \text{error}_i,$$
+
+where $\text{error}_i \sim \mathcal N(0, 18.3)$. Here's the fitted line for our version of Figure 10.2.
+
+```{r, fig.width = 3.25, fig.height = 2.5}
+kidiq %>% 
+  ggplot(aes(x = mom_iq, y = kid_score)) +
+  geom_point(size = 1/4, alpha = 1/2) +
+  geom_abline(intercept = fixef(m10.2, robust = T)[1, 1], 
+              slope = fixef(m10.2, robust = T)[2, 1],
+              size = 1/3) +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+```
+
+### 10.1.3 Including both predictors.
+
+From a syntax perspective, adding both predictors to the model is no big deal.
+
+```{r m10.3, warning = F, message = F}
+m10.3 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs + mom_iq,
+      seed = 10,
+      file = "fits/m10.03")
+```
+
+Check the summary.
+
+```{r}
+print(m10.3, robust = T)
+```
+
+### 10.1.4 Understanding the fitted model.
+
+We might write out our multivariable model model as
+
+$$\text{kid_score}_i = 25.6 + 5.9 \times \text{mom_hs}_i + 0.6 \times \text{mom_iq}_i + \text{error}_i,$$
+
+where $\text{error}_i \sim \mathcal N(0, 18.1)$. Figure 10.3 gives a sense of what this implies.
+
+```{r, fig.width = 3.25, fig.height = 2.5}
+kidiq %>% 
+  mutate(mom_hs = factor(mom_hs)) %>% 
+  
+  ggplot(aes(x = mom_iq, y = kid_score)) +
+  geom_point(aes(color = mom_hs),
+             size = 1/4, alpha = 1/2) +
+  # mom_hs == 0
+  geom_abline(intercept = fixef(m10.3, robust = T)[1, 1], 
+              slope = fixef(m10.3, robust = T)[3, 1],
+              size = 1/3) +
+  # mom_hs == 0
+  geom_abline(intercept = fixef(m10.3, robust = T)[1, 1] + fixef(m10.3, robust = T)[2, 1], 
+              slope = fixef(m10.3, robust = T)[3, 1],
+              size = 1/3, color = "grey60") +
+  scale_color_manual(values = c("black", "grey60"), breaks = NULL) +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+```
+
+## 10.2 Interpreting regression coefficients
+
+### 10.2.1 It's not always possible to change one predictor while holding all others constant.
+
+> We interpret regression slopes as comparisons of individuals that differ in one predictor while being *at the same levels of the other predictor*s. In some settings, one can also imagine manipulating the predictors to change some or hold others constant--but such an interpretation is not necessary. This becomes clearer when we consider situations in which it is logically impossible to change the value of one predictor while keeping the value of another constant (pp. 133--134, *emphasis* in the original)
+
+### 10.2.2 Counterfactual and predictive interpretations.
+
+> The most careful interpretation of regression coefficients is in terms of comparisons, for example, "When comparing two children whose mothers have the same level of education, the child whose mother is $x$ IQ points higher is predicted to have a test score that is $6x$ higher, on average." Or, "Comparing two items $i$ and $j$ that differ by an amount $x$ on predictor $k$ but are identical on all other predictors, the predicted difference $y_i - y_j$ is $\beta_k x$, on average." This is an awkward way to put things, which helps explain why people often prefer simpler formulations such as "a change of 1 in $x_k$ causes, or is associated with, a change of $\beta$ in $y$"--but those sorts of expressions can be terribly misleading. You just have to accept that regression, while a powerful data-analytic tool, can be difficult to interpret. (p. 134)
+
+## 10.3 Interactions
+
+As with base **R** `lm()`, you can express interaction terms with the `y ~ x1 + x2 + x1:x2` syntax or the `y ~ x1 + x2 + x1*x2` syntax. As in the text, I generally perfer the `:` syntax.
+
+```{r m10.4, warning = F, message = F}
+m10.4 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs + mom_iq + mom_hs:mom_iq,
+      seed = 10,
+      file = "fits/m10.04")
+```
+
+Check the summary.
+
+```{r}
+print(m10.4, robust = T)
+```
+
+We might write this out as
+
+$$\text{kid_score}_i = -11.1 + 50.9 \times \text{mom_hs}_i + 1.0 \times \text{mom_iq}_i - 0.5 \times (\text{mom_hs}_i \times \text{mom_iq}_i) + \text{error}_i,$$
+
+where $\text{error}_i \sim \mathcal N(0, 18.0)$. Now we look at this two ways with Figure 10.4.
+
+```{r, fig.width = 7.25, fig.height = 2.5}
+# left
+p1 <-
+  kidiq %>% 
+  mutate(mom_hs = factor(mom_hs)) %>% 
+  
+  ggplot(aes(x = mom_iq, y = kid_score)) +
+  geom_point(aes(color = mom_hs),
+             size = 1/3, alpha = 1/2) +
+  # mom_hs == 0
+  geom_abline(intercept = fixef(m10.4, robust = T)[1, 1], 
+              slope = fixef(m10.4, robust = T)[3, 1],
+              size = 1/3) +
+  # mom_hs == 0
+  geom_abline(intercept = fixef(m10.4, robust = T)[1, 1] + fixef(m10.4, robust = T)[2, 1], 
+              slope = fixef(m10.4, robust = T)[3, 1] + fixef(m10.4, robust = T)[4, 1],
+              size = 1/3, color = "grey60") +
+  scale_color_manual(values = c("black", "grey60"), breaks = NULL) +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+
+# right
+p2 <-
+  kidiq %>% 
+  mutate(mom_hs = factor(mom_hs)) %>% 
+  
+  ggplot(aes(x = mom_iq, y = kid_score)) +
+  geom_point(aes(color = mom_hs),
+             size = 1/3, alpha = 1/2) +
+  # mom_hs == 0
+  geom_abline(intercept = fixef(m10.4, robust = T)[1, 1], 
+              slope = fixef(m10.4, robust = T)[3, 1],
+              size = 1/3) +
+  # mom_hs == 0
+  geom_abline(intercept = fixef(m10.4, robust = T)[1, 1] + fixef(m10.4, robust = T)[2, 1], 
+              slope = fixef(m10.4, robust = T)[3, 1] + fixef(m10.4, robust = T)[4, 1],
+              size = 1/3, color = "grey60") +
+  scale_color_manual(values = c("black", "grey60"), breaks = NULL) +
+  scale_x_continuous("Mother IQ score", breaks = 0:3 * 50, limits = c(0, 150)) +
+  scale_y_continuous("Child test score", breaks = 0:2 * 50, limits = c(-20, 145))
+
+# combine
+library(patchwork)
+p1 + p2
+```
+
+"Care must be taken in interpreting the coefficients in this model" (p. 135).
+
+### 10.3.1 When should we look for interactions?
+
+"Interactions can be important, and the first place we typically look for them is with predictors that have large coefficients when not interacted" (p. 136).
+
+### 10.3.2 Interpreting regression coefficients in the presence of interactions.
+
+"Models with interactions can often be more easily interpreted if we preprocess the data by centering each input variable about its mean or some other convenient reference point" (p. 136).
+
+## 10.4 Indicator variables
+
+Load the `earnings.csv` data.
+
+```{r, message = F}
+earnings <- read_csv("ROS-Examples-master/Earnings/data/earnings.csv")
+
+head(earnings)
+```
+
+Fit a simple univariable model.
+
+```{r m10.5, warning = F, message = F}
+m10.5 <-
+  brm(data = earnings,
+      weight ~ height,
+      seed = 10,
+      file = "fits/m10.05")
+```
+
+Check the summary.
+
+```{r}
+print(m10.5, robust = T)
+```
+
+We might write this out as
+
+\begin{align*}
+\text{weight}_i & = -173.4 + 5.0 \times \text{height}_i + \text{error}_i, \;\;\; \text{where} \\
+\text{error}_i & \sim \operatorname{Normal}(0, 29.0).
+\end{align*}
+
+Compute the expected weight of a person 66 inches tall using `fixef()`.
+
+```{r}
+fixef(m10.5, robust = T)[1, 1] + fixef(m10.5, robust = T)[2, 1] * 66
+```
+
+Or use the `posterior_predict()` method.
+
+```{r}
+new <- tibble(height = 66)
+
+set.seed(10)
+
+pred <- posterior_predict(m10.5, newdata = new)
+
+str(pred)
+```
+
+Summarize the results by the posterior mean and standard deviation.
+
+```{r}
+tibble(pred = pred) %>% 
+  summarise(mean = mean(pred),
+            sd   = sd(pred))
+```
+
+### 10.4.1 Centering a predictor.
+
+Make a new `height` value, centered at 66.
+
+```{r}
+earnings <-
+  earnings %>% 
+  mutate(c_height = height - 66)
+```
+
+Fit the alternative univariable model with the centered predictor.
+
+```{r m10.6, warning = F, message = F}
+m10.6 <-
+  brm(data = earnings,
+      weight ~ c_height,
+      seed = 10,
+      file = "fits/m10.06")
+```
+
+The summary results are now more meaningful.
+
+```{r}
+print(m10.6, robust = T)
+```
+
+### 10.4.2 Including a binary variable in a regression.
+
+Get sex into the mix.
+
+```{r m10.7, warning = F, message = F}
+m10.7 <-
+  brm(data = earnings,
+      weight ~ c_height + male,
+      seed = 10,
+      file = "fits/m10.07")
+```
+
+Check the summary.
+
+```{r}
+print(m10.7, robust = T)
+```
+
+Use `fixef()` to make a point prediction on the weight of a 70 inch woman.
+
+```{r}
+fixef(m10.7)[1, 1] + fixef(m10.7)[2, 1] * (70 - 66) + fixef(m10.7)[3, 1] * 0
+```
+
+Here's the `posterior_predict()` method.
+
+```{r}
+new <- tibble(c_height = 4,
+              male     = 0)
+
+set.seed(10)
+
+tibble(pred = posterior_predict(m10.7, newdata = new)) %>% 
+  summarise(mean = mean(pred),
+            sd   = sd(pred))
+```
+
+Now work out the solution for a man of 70 inches.
+
+```{r}
+new <- tibble(c_height = 4,
+              male     = 1)
+
+set.seed(10)
+
+tibble(pred = posterior_predict(m10.7, newdata = new)) %>% 
+  summarise(mean = mean(pred),
+            sd   = sd(pred))
+```
+
+### 10.4.3 Using indicator variables for multiple levels of a categorical predictor.
+
+Here's the break down, by `ethnicity`.
+
+```{r}
+earnings %>% 
+  count(ethnicity) %>% 
+  mutate(percent = (100 * n / sum(n)) %>% round(digits = 1))
+```
+
+Now add `ethnicity` to the model.
+
+```{r m10.8, warning = F, message = F}
+m10.8 <-
+  brm(data = earnings,
+      weight ~ c_height + male + ethnicity,
+      seed = 10,
+      file = "fits/m10.08")
+```
+
+Check the summary.
+
+```{r}
+print(m10.8, robust = T)
+```
+
+As in the text, we have no summary for `ethnicity == "Black"`. Rather, `"Black"` is the *baseline* category, against which those of other `ethnicity` values are compared.
+
+### 10.4.4 Changing the baseline factor level.
+
+If we'd prefer a different baseline category, save `ethnicity` as a factor and make use of the `levels` argument. With this arrangement, `"White"` will become the baseline category.
+
+```{r}
+earnings <-
+  earnings %>% 
+  mutate(eth = factor(ethnicity,
+                      levels = c("White", "Black", "Hispanic", "Other")))
+```
+
+Refit the model.
+
+```{r m10.9, warning = F, message = F}
+m10.9 <-
+  brm(data = earnings,
+      weight ~ c_height + male + eth,
+      seed = 10,
+      file = "fits/m10.09")
+```
+
+Check the summary.
+
+```{r}
+print(m10.9, robust = T)
+```
+
+Now make a series of dummy variables.
+
+```{r}
+earnings <-
+  earnings %>% 
+  mutate(eth_White    = if_else(ethnicity == "White", 1, 0),
+         eth_Black    = if_else(ethnicity == "Black", 1, 0),
+         eth_Hispanic = if_else(ethnicity == "Hispanic", 1, 0),
+         eth_Other    = if_else(ethnicity == "Other", 1, 0))
+```
+
+Fit the dummy-variable alternative.
+
+```{r m10.10, warning = F, message = F}
+m10.10 <-
+  brm(data = earnings,
+      weight ~ c_height + male + eth_Black + eth_Hispanic + eth_Other,
+      seed = 10,
+      file = "fits/m10.10")
+```
+
+Check the summary.
+
+```{r}
+print(m10.10, robust = T)
+```
+
+### 10.4.5 Using an index variable to access a group-level predictor.
+
+"Sometimes we are fitting a regression at the individual level but with predictors at the group level" (p. 139).
+
+## 10.5 Formulating paired or blocked designs as a regression problem
+
+"We have repeatedly discussed how regression coefficients can be interpreted as comparisons. Conversely, it can often be helpful to express comparisons as regressions" (p. 139).
+
+### 10.5.1 Completely randomized experiment.
+
+> Consider a simple experiment in which $n$ people are randomly assigned to treatment and control groups, with $n/2$ in each group. The straightforward estimate of the treatment effect is then $\bar y_T - \bar y_C$, with standard error $\sqrt{\operatorname{sd}_T^2 / (n / 2) + \operatorname{sd}_C^2 / (n / 2)}$. (p. 140)
+
+Or we can compute this with regression.
+
+```{r, fig.width = 3.5, fig.height = 3.25}
+# how many would you like?
+n <- 200
+
+# population parameters
+mu_t <- 5
+mu_c <- 3
+
+sigma_t <- 0.99
+sigma_c <- 1.01
+
+# simulate
+set.seed(10)
+
+d <-
+  tibble(treatment = rep(0:1, each = n / 2)) %>% 
+  mutate(y = ifelse(treatment == 0,
+                    rnorm(n / 2, mean = mu_c, sd = sigma_c),
+                    rnorm(n / 2, mean = mu_t, sd = sigma_t)))
+
+# check the results in a plot
+d %>% 
+  mutate(condition = ifelse(treatment == 0, "control", "treatment")) %>% 
+  
+  ggplot(aes(x = y, fill = condition)) +
+  geom_histogram(binwidth = 0.25) +
+  scale_fill_viridis_d(option = "A", end = .8, breaks = NULL) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  facet_wrap(~condition, ncol = 1)
+```
+
+Fit the regression model with the `treatment` index as the predictor.
+
+```{r m10.11, warning = F, message = F}
+m10.11 <-
+  brm(data = d,
+      y ~ treatment,
+      seed = 10,
+      file = "fits/m10.11")
+```
+
+Check the summary.
+
+```{r}
+print(m10.11, robust = T)
+```
+
+The posterior median for the `treatment` coefficient is the estimate of $\bar y_T - \bar y_C$. Based on the population values, here's what we'd expect the standard error of that difference, to be.
+
+```{r}
+sqrt(sigma_t^2 / (n / 2) + sigma_c^2 / (n / 2))
+```
+
+If you look up at the 'Est.Error' column, you'll see that's about what we got for the `treatment` coefficient. Had we used informative priors, that value may have been different.
+
+### 10.5.2 Paired design.
+
+> Next consider a more complicated example in which the $n$ people are first paired, with the two people in each pair being randomly assigned to treatment and control. The standard recommendation for analyzing such data is to compute the difference within each pair, labeling these as $z_i$, for $i = 1, \dots, n/2$, and then estimate the treatment effect and standard error as $\bar z$ and $\operatorname{sd}(z) / \sqrt{n / 2}$.
+>
+> Alternatively, the data from the paired design can be analyzed using regression, in this case by fitting a model on all $n$ data points and including a treatment indicator and indicators for the pairs. (p. 140)
+
+We can approximate this by adding a `pairs` variable to our `d` data from the lase section.
+
+```{r}
+d <-
+  d %>% 
+  mutate(pairs = factor(rep(1:c(n / 2), times = 2)))
+```
+
+Here's a graphic depiction of the distribution if `pairs`-level differences.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+d %>% 
+  pivot_wider(names_from = treatment, values_from = y) %>% 
+  mutate(difference = `1` - `0`) %>% 
+  
+  ggplot(aes(x = difference)) +
+  geom_histogram(binwidth = 0.25) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  xlab(expression("difference, by pair "*(italic(z[i]))))
+```
+
+Given there are $n / 2 = 100$ pairs in these data, adding the `pairs` indicator variable to the model can place a substantial computational challenge on **brms**. To help the software fine a solution, adding just a tiny bit of prior information can help. Here we'll include a $\mathcal N(0, 5)$ prior on all the $\beta$ coefficients, with the exception of the intercept. Though these are fairly wide on the scale of the data, they will make for a more trustworthy solution.
+
+```{r m10.12, warning = F, message = F}
+m10.12 <-
+  brm(data = d,
+      family = gaussian,
+      y ~ treatment + pairs,
+      seed = 10,
+      prior(normal(0, 5), class = b),
+      file = "fits/m10.12")
+```
+
+This summary output is very long.
+
+```{r}
+print(m10.12, robust = T)
+```
+
+The `pairs == 1` pair is the reference category and the coefficient for the remaining 99 `pairs` are deviations from that. To help get a grasp on those values, here's a histogram of their posteiror medians.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+fixef(m10.12, robust = T) %>% 
+  data.frame() %>% 
+  rownames_to_column("param") %>% 
+  filter(str_detect(param, "pairs")) %>% 
+  
+  ggplot(aes(x = Estimate)) +
+  geom_histogram(binwidth = 0.25) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  xlab(expression(posterior~median~'for'~pairs[italic(i)]*', '*italic(i)==2*',..., '*italic(n)/2))
+```
+
+Also, the posterior for the `treatment` effect is still about 2. Here's a histogram of that coefficient's posterior.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+posterior_samples(m10.12) %>% 
+  ggplot(aes(x = b_treatment)) +
+  geom_histogram(binwidth = 0.05) +
+  scale_x_continuous(expression(hat(italic(y))[italic(T)]["[1]"]-hat(italic(y))[italic(C)]["[1]"]),
+                     breaks = -1:1 / 2.5 + 2) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05)))
+```
+
+But since that coefficient is conditional on the presence of the `pairs` indicator in the model, it's the treatment effect with respect to the first pair.
+
+### 10.5.3 Block design.
+
+To extend our working example to a block design where "the $n$ people are in $J$ groups" (p. 140), imagine our cases were evenly split into $j = 5$ groups, within each level of `treatment`. We could approximate this by adding a `group` variable to our `d` data.
+
+```{r}
+d <-
+  d %>% 
+  mutate(group = factor(rep(1:5, times = n / 5)))
+```
+
+Fitting this model is very similar to how we fit the last one. Just throw in `group` as a covariate. However, since we are no longer thin slicing the data like with `pairs`, we'll be fine relying on the flat default priors.
+
+```{r m10.13, warning = F, message = F}
+m10.13 <-
+  brm(data = d,
+      family = gaussian,
+      y ~ treatment + group,
+      seed = 10,
+      file = "fits/m10.13")
+```
+
+This output isn't as long as last time.
+
+```{r}
+print(m10.13, robust = T)
+```
+
+"For the purpose of estimating the treatment effect, it does not matter which group is taken as a baseline. Again, if other pre-treatment variables are available, they can be included as additional predictors in the regression" (p. 140)
+
+## 10.6 Example: uncertainty in predicting congressional elections
+
+"We illustrate simulation-based predictions in the context of a model of elections for the U.S. Congress" (p. 140).
+
+Load the `congress.csv` file.
+
+```{r, warning = F, message = F}
+congress <- read_csv("ROS-Examples-master/Congress/data/congress.csv")
+
+head(congress)
+```
+
+### 10.6.1 Background.
+
+If you look at the `congress.Rmd` file, you'll see Gelman et all re-coded some of the `v88` data before making the histogram in Figure 10.5. I don't quite follow the logic of their re-coding scheme, but here we'll follow their convention to make a faithful representation of the plot.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+congress %>% 
+  # recode
+  mutate(v88_hist = ifelse(v88 < .1, .0001, 
+                           ifelse(v88 > .9, .9999, v88))) %>% 
+
+  ggplot(aes(x = v88_hist)) +
+  geom_histogram(boundary = 0, binwidth = 0.05) +
+  scale_x_continuous("Democratic share of the two−party vote", breaks = 0:5 / 5) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Congressional elections in 1988")
+```
+
+To reduce overplotting, Gelman et al added a little jitter to the vote share values near the boundaries. To do so, we'll make a custom `jitter_vote()` function, which will streamline our plotting code.
+
+```{r}
+jitter_vote <- function(vote, seed = 10) {
+  
+  n <- length(vote)
+  
+  set.seed(seed)
+  
+  ifelse(vote < 0.1, runif(n, 0.01, 0.04), 
+         ifelse(vote > 0.9, runif(n, 0.96, 0.99), 
+                vote))
+  
+  }
+```
+
+Now make Figure 10.6a.
+
+```{r, fig.width = 2.675, fig.height = 2.75}
+p1 <-
+  congress %>% 
+  # jitter
+  mutate(v86   = jitter_vote(v86),
+         v88   = jitter_vote(v88),
+         # make this a factor for the `shape` argument
+         inc88 = factor(inc88)) %>% 
+
+  ggplot(aes(x = v86, y = v88, shape = inc88)) +
+  geom_abline(color = "grey67") +
+  geom_point() +
+  scale_shape_manual(values = c(4, 1, 16), breaks = NULL) +
+  scale_x_continuous("Democratic vote share in 1986", breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  scale_y_continuous("Democratic vote share in 1988", breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = "Raw data")
+
+p1
+```
+
+### 10.6.2 Data issues.
+
+To make the plot in Figure 10.6b, use the adjusted values`v86_adj` and `v88_adj`. After we make and save that panel, we'll bind it with the one above to make the full Figure 10.6.
+
+```{r, fig.width = 5.5, fig.height = 2.875}
+p2 <-
+  congress %>% 
+  mutate(inc88 = factor(inc88)) %>% 
+  
+  ggplot(aes(x = v86_adj, y = v88_adj, shape = inc88)) +
+  geom_abline(color = "grey67") +
+  geom_point() +
+  scale_shape_manual(values = c(4, 1, 16), breaks = NULL) +
+  scale_x_continuous("Adjusted Dem. vote share in 1986", breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  scale_y_continuous("Adjusted Dem. vote share in 1988", breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = "Adjusted data")
+
+p1 + p2
+```
+
+### 10.6.3 Fitting the model.
+
+Make a subset of the data based on using `inc88` and `v86_adj` to predict `v88_adj`.
+
+```{r}
+data88 <-
+  congress %>% 
+  transmute(vote      = v88_adj, 
+            past_vote = v86_adj, 
+            inc       = inc88)
+
+head(data88)
+```
+
+Fit the model using the adjusted vote values.
+
+```{r m10.14, warning = F, message = F}
+m10.14 <-
+  brm(data = data88,
+      vote ~ past_vote + inc,
+      seed = 10,
+      file = "fits/m10.14")
+```
+
+```{r}
+print(m10.14, robust = T)
+```
+
+### 10.6.4 Simulation for inferences and predictions of new data points.
+
+You can put a **brms** fit object into `as.matrix()`, too.
+
+```{r}
+as.matrix(m10.14) %>% str()
+```
+
+The results are the same when using `posterior_samples()`, except that the format is a data matrix rather than a data frame.
+
+```{r}
+all.equal(
+  posterior_samples(m10.14),
+  as.matrix(m10.14) %>% data.frame()
+  )
+```
+
+To prepare for the `posterior_predict()` simulations, prepare the `data90` data.
+
+```{r}
+data90 <-
+  congress %>% 
+  transmute(past_vote = v88_adj, 
+            inc       = inc90)
+
+head(data90)
+```
+
+Simulate with `posterior_predict()`.
+
+```{r}
+set.seed(10)
+
+pred90 <- 
+  posterior_predict(m10.14, 
+                    newdata = data90)
+
+str(pred90)
+```
+
+We can combine `pred90` with the `as.matrix()` output and a `sim` index and save the results as `table`.
+
+```{r}
+set.seed(10)
+
+table <-
+  bind_cols(
+    tibble(sim = 1:4000),
+    as.matrix(m10.14)[, c(4, 1:3)] %>% data.frame() %>% set_names("sigma", str_c("beta", 0:2)),
+    pred90 %>% data.frame() %>% set_names(str_c("y", 1:435))
+  )
+
+head(table)
+```
+
+### 10.6.5 Predictive simulation for a nonlinear function of new data.
+
+Within the **tidyverse**, we can compute the `dems_pred` summary, $\sum_{i=1}^{\tilde n} I (\tilde y_i > .5)$, with a combination of `rowwise()` and `c_across()` (see [here](https://dplyr.tidyverse.org/reference/across.html)).
+
+```{r}
+table <-
+  table %>% 
+  rowwise() %>% 
+  mutate(dems_pred = sum(c_across(y1:y435) > 0.5))
+
+table %>% 
+  select(dems_pred)
+```
+
+Here is the top columns in Figure 10.7.
+
+```{r}
+table %>% 
+  select(sim:y2, y435:dems_pred) %>% 
+  filter(sim %in% c(1, 2, 4000))
+```
+
+Here are the summary values for each of the columns, the equivalents to the values in the lower columns of Figure 10.7.
+
+```{r, message = F}
+table %>% 
+  pivot_longer(cols = c(sigma:y2, y435:dems_pred)) %>% 
+  group_by(name) %>% 
+  summarise(mean   = mean(value) %>% round(digits = 3),
+            median = median(value) %>% round(digits = 3),
+            sd     = sd(value) %>% round(digits = 3)) %>% 
+  pivot_longer(-name, names_to = "summary") %>% 
+  pivot_wider(names_from = name, values_from = value) %>% 
+  select(summary, sigma, starts_with("beta"), starts_with("y"), dems_pred)
+```
+
+It's not clear, to me, why our standard deviation estimate for `dems_pred` is so much lower that the one in the text.
+
+### 10.6.6 ombining simulation and analytic calculations.
+
+"In some settings it is helpful to supplement simulation-based inference with mathematical analysis" (p. 144).
+
+## 10.7 Mathematical notation and statistical inference
+
+"When illustrating specific examples, it helps to use descriptive variable names. In order to discuss more general theory and data manipulations, however, we shall adopt generic mathematical notation" (p. 144).
+
+### 10.7.1 Predictors.
+
+*Predictors* include not only the predictor variables in the data matrix, the term can also encompass interactions among those predictors. 
+
+### 10.7.2 Regression in vector-matrix notation.
+
+"We follow the usual notation and label the outcome for the $i^\text{th}$ individual as $y-i$ and the deterministic prediction as $X_i \beta = \beta_1 X_{i1} + \cdots + \beta_k X_{ik}$, indexing the people in the data as $i = 1, \dots, n$" (p. 145). Here $X_{i1} = 1$ and $\beta_1$ is the model intercept.
+
+> The deviations of the outcomes from the model, called *errors*, are labeled as $\epsilon_i$ and assumed to follow a normal distribution with mean 0 and standard deviation $\sigma$, which we write as $\operatorname N(0, \sigma^2)$. The term *residual* is used for the differences between the outcomes and predictions from the estimated model. Thus, $y - X \beta$ and $y - X \hat \beta$ are the vectors of errors and residuals, respectively. We use the notation $\tilde y$ for predictions from the model, given new data $\tilde X$. (p. 146, *emphasis* in the original)
+
+"Conventions vary across disciplines regarding what terms to use for the variables we refer to as predictors and outcomes (or responses)" (p. 146). I personally prefer to refer to my "response" variables as *criteria* or *criterion variables*, which are the terms I'll use in my own prose. However, I'll use the authors' words when quoting them.
+
+### 10.7.3 Two ways of writing the model.
+
+> The classical linear regression model can then be written mathematically as
+> 
+> $$y_i = \beta_1 X_{i1} + \cdots + \beta_k X_{ik} + \epsilon_i, \;\;\; \text{for } i, \dots, n,$$
+> 
+> where the errors $\epsilon_i$ have independent normal distributions with mean 0 and standard deviation $\sigma$. An equivalent representation is,
+> 
+> $$y_i = X_i \beta + \epsilon_i, \;\;\; \text{for } i, \dots, n,$$
+> 
+> where $X$ is an $n$ by $k$ matrix with $i^\text{th}$ row $X_i$, or, using multivariate notation,
+> 
+> $$y_i \sim \operatorname N(X_i \beta, \sigma^2), \;\;\; \text{for } i, \dots, n.$$
+> 
+> For even more compact notation we can use,
+> 
+> $$y_i \sim \operatorname N(X_i \beta, \sigma^2 I),$$
+> 
+> where $y$ is a vector of length $n$, $X$ is a $n \times k$ matrix of predictors, $\beta$ is a column vector of length $k$, and $I$ is the $n \times n$ identity matrix. (p. 146)
+
+### 10.7.4 Least squares, maximum likelihood, and Bayesian inference.
+
+> The steps of estimation and statistical inference in linear regression with multiple predictors are the same as with one predictor, as described in Sections 8.1 and 9.5. The starting point is the least squares estimate, that is, the vector $\hat \beta$ that minimizes the sum of the squared residuals, $\text{RSS} = \sum_{i=1}^n (y_i - X \hat \beta)^2$. For the standard linear regression model with predictors that are measured accurately and errors that are independent, of equal variance, and normally distributed, the least squares solution is also the maximum likelihood estimate. (p. 146)
+
+Bayesian inference adds the model priors into the mix.
+
+### 10.7.5 Nonidentified parameters, collinearity, and the likelihood function.
+
+> A model is said to be *nonidentifiable* if it contains parameters that cannot be estimated uniquely--or, to put it another way, that have standard errors of infinity. The offending parameters are called *nonidentified*. The most familiar and important example of nonidentifiability arises from *collinearity* (also called multicollinearity) of regression predictors. A set of predictors is collinear if there is a linear combination of them that equals 0 for all the data. (p. 146, *emphasis* in the original)
+
+Difficulties with identification and collinearity can be overcome with the deft use of priors.
+
+### 10.7.6 Hypothesis testing: why we do not like $t$ tests and $F$ tests.
+
+"One thing that we do *not* recommend is traditional null hypothesis significance tests" (p. 147, *emphasis* in the original).
+
+## 10.8 Weighted regression
+
+> In some settings it makes sense to weight some data points more than others when fitting the model, and one can perform *weighted least squares*, where the estimate $\hat \beta_\text{wls}$ is that which minimizes $\sum_{i=1}^n w_i(y_i - X_i \beta)^2$, for some specified $w = (w_1, \dots , w_n)$ of nonnegative weights. Points with higher weights count for more in this formula, so the regression line is constrained to be closer to them. (p. 147, *emphasis* in the original)
+
+### 10.8.1 Three models leading to weighted regression.
+
+Three contexts for weighted regression are:
+
+* *using observed data to represent a larger population*, such as in poststratification;
+* *duplicate observations*, such as in aggregated binomial regression, and
+* *unequal variances*, as in meta-analyses.
+
+The `brms::brm()` function can acomodate weights, but it's syntax is different that the `stan_glm(y ~ x, data=data, weights=w))` syntax the authors displayed for **rstanarm**. The `brm()` syntax will actually depend on the kinds of weights and the type of model. For one example connected to when we'd like to use *observed data to represent a larger population*, we might use the `weights()` operator. From the *Additional response information* subsection of the `brmsformula` section within the [**brms** reference manual](https://CRAN.R-project.org/package=brms/brms.pdf), we read:
+
+> Weighted regression may be performed using `weights` in the `aterms` part. Internally, this is implemented by multiplying the log-posterior values of each observation by their corresponding weights. Suppose that variable `wei` contains the weights and that `yi` is the response variable. Then, formula `yi | weights(wei) ~ predictors` implements a weighted regression.
+
+### 10.8.2 Using a matrix of weights to account for correlated errors.
+
+"Models with correlations appear in the analysis of time series, spatial statistics, cluster samples, and other settings with structured data" (p. 148). **brms** has a variety of options for these kinds of models.
+
+## 10.9 Fitting the same model to many datasets
+
+> It is common to fit a regression model repeatedly, either for different datasets or to subsets of an existing dataset. For example, one could estimate the relation between height and earnings using surveys from several years, or from several countries, or within different regions or states within the United States.
+>
+> Beyond the scope of this book is *multilevel modeling*, a way to estimate a regression repeatedly, partially pooling information from the different fits. (p. 148, *emphasis* in the original)
+
+### 10.9.1 Predicting party identification.
+
+Load the `nes.txt` data.
+
+```{r, results = "hide"}
+nes <- read.table("ROS-Examples-master/NES/data/nes.txt", header = T)
+
+# not shown, for the sake of space
+glimpse(nes)
+```
+
+Fit the multivariable model on the data subsetted by one of the years.
+
+```{r m10.15}
+m10.15 <-
+  brm(data = nes %>% filter(year == 1972),
+      family = gaussian,
+      partyid7 ~ real_ideo + race_adj + factor(age_discrete) + educ1 + female + income,
+      cores = 4,
+      seed = 10,
+      file = "fits/m10.15")
+```
+
+Check the model.
+
+```{r}
+print(m10.15, robust = T)
+```
+
+Now make a custom function to update this model, based on different subsets of the data.
+
+```{r}
+update_fit <- function(data, ...) {
+  
+  update(m10.15, 
+         newdata = data,
+         cores = 4, seed = 10,
+         ...) %>%
+    fixef(robust = T) %>% 
+    data.frame() %>% 
+    rownames_to_column("parameter")
+
+}
+```
+
+Run the model multiple times.
+
+```{r, warning = F, message = F, results = "hide"}
+sim <-
+  nes %>% 
+  nest(data = -year) %>% 
+  filter(year %in% c(1972 + 0:7 * 4)) %>% 
+  mutate(fixef = map(data, update_fit)) %>% 
+  select(-data)
+```
+
+What did we do?
+
+```{r}
+sim %>% 
+  unnest(fixef)
+```
+
+Make Figure 10.9.
+
+```{r, fig.width = 8, fig.height = 2.75}
+sim %>% 
+  unnest(fixef) %>% 
+  mutate(facet = case_when(
+    parameter == "Intercept" ~ "Intercept",
+    parameter == "real_ideo" ~ "Ideology",
+    parameter == "race_adj" ~ "Black",
+    parameter == "factorage_discrete2" ~ "Age_30_44",
+    parameter == "factorage_discrete3" ~ "Age_45_64",
+    parameter == "factorage_discrete4" ~ "Age_65_up",
+    parameter == "educ1" ~ "Education",
+    parameter == "female" ~ "Female",
+    parameter == "income" ~ "Income"
+  )) %>% 
+  mutate(facet = factor(facet,
+                        levels = c("Intercept", "Ideology", "Black", "Age_30_44", "Age_45_64", "Age_65_up", "Education", "Female", "Income"))) %>% 
+  
+  ggplot(aes(x = year, y = Estimate, ymin = Estimate - Est.Error, ymax = Estimate + Est.Error)) +
+  geom_hline(yintercept = 0, linetype = 2, size = 1/4) +
+  geom_pointrange(size = 1/4, fatten = 1/2) +
+  scale_x_continuous(NULL, breaks = c(1972, 1986, 2000)) +
+  ylab("Coefficient") +
+  facet_wrap(~facet, scales = "free_y", nrow = 2)
+```
+
+"Figure 10.9 demonstrates the power of displaying multiple model fits next to each other in a graph, thus revealing average patterns (in comparison to the zero lines shown on each plot) and trends" (p. 149).
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
