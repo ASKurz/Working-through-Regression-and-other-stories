@@ -1,0 +1,573 @@
+---
+title: "Chapter 1: Overview"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Overview
+
+## 1.1 The three challenges of statistics
+
+> The three challenges of statistical inference are:
+> 
+> 1. *Generalizing from sample to population*, a problem that is associated with survey sampling but actually arises in nearly every application of statistical inference;
+> 2. *Generalizing from treatment to control group*, a problem that is associated with causal inference, which is implicitly or explicitly part of the interpretation of most regressions we have seen; and
+> 3. *Generalizing from observed measurements to the underlying constructs of interest*, as most of the time our data do not record exactly what we would ideally like to study. (p. 3, *emphasis* in the original)
+
+## 1.2 Why learn regression?
+
+"Regression is a method that allows researchers to summarize how predictions or average values of an *outcome* vary across individuals defined by a set of *predictors*" (p. 4, *emphasis* in the original). To get a sense, load the `hibbs.dat` data.
+
+```{r, message = F, warning = F}
+library(tidyverse)
+
+hibbs <- read_table2("ROS-Examples-master/ElectionsEconomy/data/hibbs.dat")
+
+glimpse(hibbs)
+```
+
+Make the left panel of Figure 1.1. Before we save the figure, we'll alter the default **ggplot2** theme.
+
+```{r, warning = F, message = F}
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+p1 <-
+  hibbs %>% 
+  ggplot(aes(x = growth, y = vote, label = year)) +
+  geom_hline(yintercept = 50, color = "grey85", size = 1/4) +
+  geom_text(size = 3) +
+  scale_x_continuous(labels = function(x) str_c(x, "%")) +
+  scale_y_continuous(labels = function(x) str_c(x, "%")) +
+  labs(subtitle = "Forecasting the election from the economy",
+       x = "Average recent growth in personal income",
+       y = "Incumbent party's vote share")
+```
+
+The right panel of Figure 1.1 requires a linear model. We'll use `brms::brm()`.
+
+```{r, warning = F, message = F}
+library(brms)
+```
+
+Fit the model using default priors.
+
+```{r m1.1, warning = F, message = F}
+m1.1 <-
+  brm(data = hibbs,
+      family = gaussian,
+      vote ~ 0 + Intercept + growth,
+      cores = 4, chains = 4,
+      seed = 1,
+      file = "fits/m01.01")
+```
+
+Check the model summary.
+
+```{r}
+print(m1.1)
+```
+
+Now make Figure 1.1b and display the full figure.
+
+```{r, warning = F, message = F, fig.width = 8, fig.height = 3.5}
+nd <- tibble(growth = seq(from = -1, to = 5, length.out = 50))
+
+p2 <-
+  fitted(m1.1,
+         newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  mutate(vote = Estimate) %>% 
+  
+  ggplot(aes(x = growth, y = vote)) +
+  geom_hline(yintercept = 50, color = "grey85", size = 1/4) +
+  geom_smooth(aes(ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              alpha = 1/5, size = 1/4) +
+  geom_point(data = hibbs) +
+  annotate(geom = "text",
+           x = 2.5, y = 53,
+           label = str_c("y==", round(fixef(m1.1)[1, 1], digits = 1), "+", round(fixef(m1.1)[2, 1], digits = 1), "*x"),
+           hjust = 0, parse = T) +
+  scale_x_continuous(labels = function(x) str_c(x, "%")) +
+  scale_y_continuous(labels = function(x) str_c(x, "%")) +
+  labs(subtitle = "Data and linear fit",
+       x = "Average recent growth in personal income",
+       y = "Incumbent party's vote share")
+
+library(patchwork)
+p1 + p2 &
+  coord_cartesian(xlim = c(-0.5, 4.5),
+                  ylim = c(42, 63))
+```
+
+Some of the more important applications for regression are
+
+* prediction,
+* exploring associations,
+* extrapolation, and
+* causal inference.
+
+## 1.3 Some examples of regression
+
+"To give a sense of the difficulties involved in applied regression, [Gelman et al] briefly discuss[ed] some examples involving sampling, prediction, and causal inference" (p. 5).
+
+### 1.3.1 Estimating public opinion from an opt-in internet survey.
+
+### 1.3.2 A randomized experiment on the effect of an educational television program.
+
+To make Figure 1.2, we need the `electric` data.
+
+```{r, message = F, warning = F}
+electric <- read_csv("ROS-Examples-master/ElectricCompany/data/electric.csv")
+
+glimpse(electric)
+```
+
+Make Figure 1.2.
+
+```{r, fig.width = 8, fig.height = 2.5}
+electric %>% 
+  mutate(grade = str_c("Grade ", grade),
+         class = ifelse(treatment == 0, "Control\nclasses", "Treated\nclasses")) %>% 
+  # the next two lines are for the panel-wise mean lines
+  group_by(grade, class) %>% 
+  mutate(mean = mean(post_test)) %>% 
+  
+  ggplot(aes(x = post_test)) +
+  geom_histogram(fill = "grey67", binwidth = 4, boundary = 0) +
+  geom_vline(aes(xintercept = mean)) +
+  scale_x_continuous("Post-treatment classroom-average test scores", breaks = 2:4 * 25) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  facet_grid(class~grade, switch = "y")
+```
+
+### 1.3.3 Estimating the effects of United Nations peacekeeping, using pre-treatment variables to adjust for differences between treatment and control groups.
+
+To make Figure 1.3, we need the `pk&pkept_old.dta` data.
+
+```{r}
+peace <- haven::read_dta("ROS-Examples-master/Peacekeeping/data/pk&pkept_old.dta")
+
+# glimpse(peace)
+```
+
+Figure 1.3 will require some data wrangling (see [https://github.com/avehtari/ROS-Examples/blob/master/Peacekeeping/peace.Rmd](https://github.com/avehtari/ROS-Examples/blob/master/Peacekeeping/peace.Rmd)).
+
+```{r, fig.width = 8, fig.height = 3}
+# wrangle
+peace <-
+  peace %>% 
+  mutate(censored     = morewar == 0,
+         badness      = log(hazard1),  # Aki made this, but it isn't needed for this plot
+         peacekeepers = pk_dum == 1) %>% 
+  mutate(faildate = ifelse(is.na(faildate) & !is.na(cfdate), as.Date("2004-12-31"), faildate) %>% as.Date(., origin = "1970-01-01")) %>% 
+  mutate(delay = as.numeric(faildate - cfdate) / 365.24) %>% 
+  mutate(ok = pcw == 1 & !is.na(delay))
+
+peace %>% 
+  filter(ok == T, censored == F) %>% 
+  # to make the facet labels pretty
+  mutate(peacekeepers = factor(peacekeepers,
+                               levels = c(T, F),
+                               labels = c("With peacekeeping: 56% of countries stayed at peace.\nFor others, histogram of time until civil war returned:",
+                                          "Without peackeeping: 34% stayed at peace.\nFor others, histogram of time until civil war returned:"))) %>% 
+  
+  # plot!
+  ggplot(aes(x = delay)) +
+  geom_histogram(boundary = 0, binwidth = 0.5) +
+  scale_x_continuous("Years until return of war", limits = c(0, 8)) +
+  facet_wrap(~peacekeepers, scales = "free_y")
+```
+
+Figure 1.4.
+
+```{r, fig.width = 8, fig.height = 3.25}
+# new variables
+peace <-
+  peace %>% 
+  mutate(ok2      = ifelse(ok == T & !is.na(badness), T, F),
+         badness2 = badness / 2 + 8) 
+
+# wrangle
+peace %>% 
+  filter(ok2 == T) %>% 
+  # to make the facet labels pretty
+  mutate(peacekeepers = factor(peacekeepers,
+                               levels = c(F, T),
+                               labels = c("Without U.N. peacekeeping",
+                                          "With U.N. peacekeeping"))) %>%
+  mutate(peacekeepers = fct_rev(peacekeepers),
+         censored = factor(censored,
+                           levels = c(T, F),
+                           labels = c("censored", "not censored"))) %>% 
+  
+  #plot!
+  ggplot(aes(x = badness2, y = delay)) + 
+  geom_point(aes(shape = censored)) +
+  scale_shape_manual(NULL, values = c(1, 19)) +
+  scale_x_continuous("Pre−treatment measure of problems with the country",
+                     breaks = quantile(filter(peace, ok2 == T) %>% pull(badness2), probs = c(.05, .95)),
+                     labels = c("not so bad", "really bad")) +
+  ylab("Delay (in years) before return of conflict\n(open circles where conflict did not return)") +
+  theme(legend.background = element_blank(),
+        legend.position = c(.92, .9)) +
+  facet_wrap(~peacekeepers)
+``` 
+
+### 1.3.4 Estimating the effect of gun laws, and the difficulty of inference using regression with a large number of predictors.
+
+### 1.3.5 Comparing the peacekeeping and gun-control studies.
+
+## 1.4 Challenges in building, understanding, and interpreting regressions
+
+"We can distinguish two different ways in which regression is used for causal inference: estimating a relationship and adjusting for background variables" (p. 10).
+
+### 1.4.1 Regression to estimate a relationship of interest.
+
+If yoo go to [https://github.com/avehtari/ROS-Examples/blob/master/SimpleCausal/SimpleCausal.Rmd](https://github.com/avehtari/ROS-Examples/blob/master/SimpleCausal/SimpleCausal.Rmd), you'll see the data for this section are simulated. Here is the simulation.
+
+```{r}
+n <- 50
+
+# Vehtari did not include a seed number in his code
+set.seed(1)
+
+d <-
+  tibble(x = runif(n, 1, 5)) %>% 
+  mutate(y        = rnorm(n, 10 + 3 * x, 3),
+         x_binary = ifelse(x < 3, 0, 1))
+
+head(d)
+```
+
+Fit the model
+
+```{r m1.2a}
+m1.2a <-
+  brm(data = d,
+      family = gaussian,
+      y ~ 0 + Intercept + x_binary,
+      cores = 4, chains = 4,
+      seed = 1,
+      file = "fits/m01.02a")
+
+m1.2b <-
+  update(m1.2a,
+         newdata = d,
+         y ~ 0 + Intercept + x,
+         cores = 4, chains = 4,
+         seed = 1,
+         file = "fits/m01.02b")
+```
+
+Check the model summaries.
+
+```{r }
+posterior_summary(m1.2a)[1:3, ] %>% round(digits = 2)
+posterior_summary(m1.2b)[1:3, ] %>% round(digits = 2)
+```
+
+Make Figure 1.5a.
+
+```{r}
+nd <-
+  tibble(x_binary = seq(from = -0.1, to = 1.1, length.out = 50))
+
+p1 <-
+  fitted(m1.2a,
+         newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  ggplot(aes(x = x_binary)) +
+  geom_smooth(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              alpha = 1/5, size = 1/4) +
+  geom_point(data = d,
+             aes(y = y)) +
+  annotate(geom = "text",
+           x = 0.25, y = 12,
+           label = str_c("Estimated treatment effect is\nslope of fitted line: ", round(fixef(m1.2a)[2, 1], digits = 1)),
+           hjust = 0, size = 3) +
+  scale_x_continuous(NULL, 
+                     breaks = 0:1, labels = c("Control", "Treatment"), expand = c(0, 0)) +
+  labs(subtitle = "Regression with binary treatment",
+       y = "Outcome measurement")
+```
+
+Make Figure 1.5b, combine the two panels, and plot.
+
+```{r, fig.width = 8, fig.height = 3.25}
+nd <-
+  tibble(x = seq(from = 0.8, to = 5.2, length.out = 50))
+
+p2 <-
+  fitted(m1.2b,
+         newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  ggplot(aes(x = x)) +
+  geom_smooth(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              alpha = 1/5, size = 1/4) +
+  geom_point(data = d,
+             aes(y = y)) +
+  annotate(geom = "text",
+           x = 2.75, y = 12,
+           label = str_c("Estimated treatment\neffect per unit of x is\nslope of fitted line: ", round(fixef(m1.2b)[2, 1], digits = 1)),
+           hjust = 0, size = 3) +
+  scale_x_continuous("Treatment level", expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  labs(subtitle = "Regression with continuous treatment")
+
+p1 + p2
+```
+
+The next two models require a little more simulation.
+
+```{r}
+set.seed(1)
+
+d <-
+  d %>% 
+  mutate(y = rnorm(n, mean = 5 + 30 * exp(-x), sd = 2))
+```
+
+Fit the linear and non-linear models.
+
+```{r m1.3a}
+# linear
+m1.3a <-
+  brm(data = d,
+      family = gaussian,
+      y ~ 0 + Intercept + x,
+      cores = 4, chains = 4,
+      seed = 1,
+      file = "fits/m01.03a")
+
+# non-linear
+m1.3b <-
+  brm(data = d,
+      family = gaussian,
+      y ~ 0 + Intercept + exp(-x),
+      cores = 4, chains = 4,
+      seed = 1,
+      file = "fits/m01.03b")
+```
+
+Check the model summaries.
+
+```{r }
+posterior_summary(m1.3a)[1:3, ] %>% round(digits = 2)
+posterior_summary(m1.3b)[1:3, ] %>% round(digits = 2)
+```
+
+Make Figure 1.6.
+
+```{r, fig.width = 8, fig.height = 3.25}
+nd <-
+  tibble(x = seq(from = 0.8, to = 5.2, length.out = 50))
+
+# linear
+p2 <-
+  fitted(m1.3a,
+         newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  ggplot(aes(x = x)) +
+  geom_smooth(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              alpha = 1/5, size = 1/4) +
+  geom_point(data = d,
+             aes(y = y)) +
+  scale_x_continuous("Treatment level", expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  labs(subtitle = "Nonlinear effect, estimated with straight line fit")
+
+# non-linear
+p1 <-
+  fitted(m1.3b,
+         newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  ggplot(aes(x = x)) +
+  geom_smooth(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              alpha = 1/5, size = 1/4) +
+  geom_point(data = d,
+             aes(y = y)) +
+  scale_x_continuous("Treatment level", expand = c(0, 0)) +
+  labs(subtitle = "Nonlinear treatment effect",
+       y = "Outcome measurement")
+
+# combine and plot!
+p1 + p2
+```
+
+Figure 1.7 was made without fitting a model. The data are of four points and the lines simply connect them.
+
+```{r, fig.width = 4.5, fig.height = 3.25}
+tibble(radon = c(0, 20, 0, 20),
+       p     = c(.07409 + c(0, 20) * .0134,
+                 .00579 + c(0, 20) * .0026),
+       group = c("Smokers", "Smokers", "Nonsmokers", "Nonsmokers")) %>% 
+  ggplot(aes(x = radon, y = p, group = group)) +
+  geom_line() +
+  annotate(geom = "text",
+           x = 10, y = c(.05, .18),
+           label = c("Nonsmokers", "Smokers")) +
+  scale_x_continuous("Home radon exposure (pCi/L)", breaks = 0:6 * 2,
+                     expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous("Probability of lung cancer",
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Example of an interaction") +
+  coord_cartesian(xlim = c(0, 12),
+                  ylim = c(0, 0.25))
+```
+
+### 1.4.2 Regression to adjust for differences between treatment and control groups.
+
+Once again we have an example with simulated data.
+
+```{r}
+n <- 100
+
+set.seed(1)
+
+d <-
+  tibble(xx = rnorm(n, mean = 0, sd = 1)^2,
+         z  = rep(0:1, n / 2)) %>% 
+  mutate(yy = rnorm(n, mean = 20 + 5 * xx + 10 * z, sd = 3))
+
+d
+```
+
+Fit the model.
+
+```{r m1.4}
+m1.4 <-
+  brm(data = d,
+      family = gaussian,
+      yy ~ 0 + Intercept + xx + z,
+      cores = 4, chains = 4,
+      seed = 1,
+      file = "fits/m01.04")
+```
+
+Check the model summary.
+
+```{r}
+print(m1.4)
+```
+
+Make Figure 1.8.
+
+```{r, fig.width = 4.5, fig.height = 3.25}
+# for the arrow
+line <-
+  tibble(x    = 4.3,
+         xend = 4.3) %>% 
+  mutate(y    = fixef(m1.4)[1, 1] + fixef(m1.4)[2, 1] * x,
+         yend = fixef(m1.4)[1, 1] + fixef(m1.4)[2, 1] * x + fixef(m1.4)[3, 1])
+
+# define the newdata
+nd <-
+  crossing(z  = 0:1,
+           xx = seq(from = -0.2, to = 8.05, length.out = 50))
+
+# get the fitted draws
+fitted(m1.4,
+       newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  # plot!
+  ggplot(aes(x = xx)) +
+  geom_smooth(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5, group = z),
+              stat = "identity",
+              alpha = 1/5, size = 1/4) +
+  geom_point(data = d,
+             aes(y = yy, shape = factor(z))) +
+  geom_segment(data = line,
+               aes(x = x, xend = xend,
+                   y = y, yend = yend),
+               arrow = arrow(length = unit(0.2, "cm"), ends = "both")) +
+  annotate(geom = "text",
+           x = 4.4, y = 45.2,
+           label = str_c("Estimated treatment\neffect is about ", round(fixef(m1.4)[3, 1], digits = 1)),
+           hjust = 0, size = 3.5) +
+  annotate(geom = "text",
+           x = c(3.2, 2.9), y = c(31, 47),
+           label = c("Controls", "Treated")) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  scale_x_continuous("Pre−treatment predictor", expand = c(0, 0)) +
+  scale_y_continuous("Outcome measurement", breaks = 2:6 * 10) +
+  labs(subtitle = "Continuous pre−treatment predictor and binary treatment") +
+  coord_cartesian(ylim = c(15, 62))
+```
+
+### 1.4.3 Interpreting coefficients in a predictive model.
+
+Not sure where these estimates came from. Keep an eye out for this in later chapters.
+
+### 1.4.4 Building, interpreting, and checking regression models.
+
+The authors proposed the statistical model workflow has four basic steps:
+
+1. Model building
+2. Model fitting
+3. Understanding the model fits
+4. Criticism
+
+## 1.5 Classical and Bayesian inference
+
+> As statisticians, we spend much of our effort fitting models to data and using those models to make predictions. These steps can be performed under various methodological and philosophical frameworks. Common to all these approaches are three concerns: (1) what *information* is being used in the estimation process, (2) what *assumptions* are being made, and (3) how estimates and predictions are *interpreted*, in a classical or Bayesian framework. (p. 13, *emphasis* in the original)
+
+### 1.5.1 Information.
+
+### 1.5.2 Assumptions
+
+### 1.5.3 Classical inference.
+
+### 1.5.4 Bayesian inference.
+
+## 1.6 Computing least squares and Bayesian regression
+
+We fit Bayesian models in **R** using the `brm()` function from the **brms** package. Given a data set called `my_data` containing a criterino variable `y` and a single predictor variable `x`, you can fit a basic linear regression model with `brm()` like so.
+
+```{r, eval = F}
+fit <-
+  brm(data = my_data,
+      y ~ x)
+```
+
+In the case of large models that take a long time to fit, I'm not aware `brm()` has an `algorithm` argument they way the authors advertised for `stan_glm()`. However, starting with [version 2.14.0](https://cran.r-project.org/web/packages/brms/news/news.html), **brms** now supports within-chain parallelizaion via `backend = "cmdstanr"`. To learn more about this approach, see Weber and Bürkner's vignette, [*Running brms models with within-chain parallelization*](https://cran.r-project.org/web/packages/brms/vignettes/brms_threading.html).
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
