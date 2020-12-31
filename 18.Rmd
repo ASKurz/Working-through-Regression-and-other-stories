@@ -1,0 +1,464 @@
+---
+title: "Chapter 18: Causal inference and randomized experiments"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Causal inference and randomized experiments
+
+> This section of the book considers *causal inference*, which concerns what *would happen* to an outcome $y$ as a result of a treatment, intervention, or exposure $z$, given pre-treatment information $x$. This chapter introduces the notation and ideas of causal inference in the context of randomized experiments, which allow clean inference for average causal effects and serve as a starting point for understanding the tools and challenges of causal estimation. (p. 339, *emphasis* in the original)
+
+## 18.1 Basics of causal inference
+
+> For most statisticians, ourselves included, causal effects are conceptualized as a comparison between different potential outcomes of what might have occurred under different scenarios. This comparison could be between a factual state (what did happen) and one or more counterfactual states (representing what might have happened), or it could be a comparison among various counterfactuals. (p. 339)
+
+### 18.1.1 Running example.
+
+* 4 friends are in a treatment condition where they 3 grams of fish oil supplement daily for a year
+* another 4 friends are in the control condition where they do not take the fish oil supplement for that same year
+* at the end of the year, you take systolic blood pressure for all 8 friends
+* 60 mmHg and higher are considered *high blood pressure*
+* you presume everyone complied with the study parameters
+
+### 18.1.2 Potential outcomes, counterfactuals, and causal effects.
+
+* $z = 0$ denotes "no fish oil supplements ingested" 
+* $z = 1$ denotes "3 grams per day of fish oil supplements ingested"
+
+The *potential outcomes* are:
+
+* $y_i^0$: the blood pressure that would result if the person had no supplement
+* $y_i^1$: the blood pressure that would result if the person had received the prescribed supplement
+
+The *factual state* is what actually occurred for the participants; it is observed. The *counterfactual state* is what we infer would have occurred had the participants been in different conditions; it is not observed.
+
+The causal effect of the supplement is $\tau_i = y_i^1 - y_i^0$.
+
+### 18.1.3 The fundamental problem of causal inference.
+
+"The problem inherent in determining the effect for any given individual, however, is that we can never observe both potential outcomes $y_i^0$ *and* $y_i^1$" (p. 340).
+
+Here's the data for the table in Figure 18.1.
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+d <-
+  tibble(i         = c("Audrey", "Anna", "Bob", "Bill", "Caitlin", "Cara", "Dave", "Doug"),
+         female    = c(1, 1, 0, 0, 1, 1, 0, 0),
+         age       = rep(4:7 * 10, each = 2),
+         treatment = rep(0:1, each = 4),
+         y0        = c(140, 140, 150, 150, NA, NA, NA, NA),
+         y1        = c(NA, NA, NA, NA, 155, 155, 160, 160),
+         y         = ifelse(is.na(y1), y0, y1))
+
+d
+```
+
+"If treatments are randomly assigned, we can estimate an average causal effect, but even then this will not tell us about the effect on any given person" (p. 340).
+
+### 18.1.4 Close substitutes.
+
+Because of potential history effects, you cannot simply substitute someone's pre-treatment measure of the criterion for what their post measure would have been had they not been in the treatment condition. Say we're talking about the $j$th participant. Maybe $y_j^\text{before} = y_j^0$, or maybe $y_j^\text{before} \neq y_j^0$. Even if you do some kind of ABA design, this is only valid if the treatment in B has short-term effects. Sometimes you can overcome this with a *washout period*, ABCA. Randomizing large numbers of people to treatment conditions helps, some.
+
+### 18.1.5 More than two treatment levels, continuous treatments, and multiple treatment factors.
+
+> Going beyond a simple treatment-and-control setting, multiple treatment effects can be defined relative to a baseline level. With random assignment, this simply follows general principles of regression modeling....
+>
+> With several discrete treatments that are unordered, as in a comparison of three different sorts of psychotherapy, we can move to multilevel modeling, with the group index indicating the treatment assigned to each unit, and a second-level model on the group coefficients, or treatment effects.
+>
+> Additionally, multiple treatments can be administered in combination. For instance, depressed individuals could be randomly assigned to receive nothing, drugs, counseling sessions, or both drugs and counseling sessions. These combinations could be modeled as two treatments and their interaction or as four distinct treatments. (p. 342)
+
+## 18.2 Average causal effects
+
+"In experiments in which only one treatment is applied to each individual, it will not be possible to estimate individual-level causal effects, $y_i^1 - y_i^0$" (p. 342).
+
+To make the table in Figure 18.2, update our `d` data.
+
+```{r}
+d %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2))
+```
+
+If we actually had this information, we could compute $\tau_i = y_i^1 - y_i^0$, the individual treatment effect for all $i$ cases.
+
+### 18.2.1 Sample average treatment effect (SATE).
+
+Here's the average treatment effect, if we had all the data.
+
+```{r}
+d %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = y1 - y0) %>% 
+  summarise(mean_tx_effect = mean(y))
+```
+
+You call this the sample average treatment effect (SATE), which may be defined as
+
+$$\tau_\text{SATE} = \frac{1}{n} \sum_{i = 1}^n (y_i^1 = y_i^0).$$
+
+### 18.2.2 Conditional average treatment effect (CATE).
+
+The average treatment effect for a subset (e.g., based on race or sex) is the *conditional average treatment effect* (CATE). Here's the CATE by `female`.
+
+```{r, message = F}
+d %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = y1 - y0) %>% 
+  group_by(female) %>% 
+  summarise(mean_tx_effect = mean(y))
+```
+
+### 18.2.3 Population average treatment effect (PATE).
+
+Going beyond the sample, the *population average treatment effect* (PATE) may be defined as
+
+$$\tau_\text{PATE} = \frac{1}{N} \sum_{i = 1}^N (y_i^1 = y_i^0).$$
+
+From the PATE perspective, we now have missing data for (a) the counterfactual values within our sample and (b) all potential outcomes for those within the population but not in our sample.
+
+### 18.2.4 Problems with self-selection into treatment groups.
+
+You can run into problems when experimental groups are not balances on all relevant variables. For example, our two `treatment` differ substantially by their average `age`.
+
+```{r, message = F}
+d %>% 
+  group_by(treatment) %>% 
+  summarise(mean_age = mean(age))
+```
+
+### 18.2.5 Using design and analysis to address imbalance and lack of overlap between treatment and control groups.
+
+> In practice, we can never ensure that treatment and control groups are balanced on all relevant pre-treatment characteristics. However, there are statistical approaches that may bring us closer. At the design stage, we can use *randomization* to ensure that treatment and control groups are balanced in expectation, and we can use *blocking* to reduce the variation in any imbalance. At the analysis stage, we can *adjust* for pre-treatment variables to correct for differences between the two groups to reduce bias in our estimate of the sample average treatment effect. We can further adjust for differences between sample and population if our goal is to estimate the population average treatment effect. (p. 344, *emphasis* in the original)
+
+## 18.3 Randomized experiments
+
+We can randomly assign using the `sample()` function.
+
+```{r}
+set.seed(18)
+
+sample(c(0, 0, 0, 0, 1, 1, 1, 1), size = 8, replace = F)
+```
+
+Here's a more compact way to achieve the same kind of thing.
+
+```{r}
+set.seed(18)
+
+sample(0:1, size = 8, replace = T)
+```
+
+### 18.3.1 Completely randomized experiments.
+
+"In a *completely randomized experiment*, the probability of being assigned to the treatment is the same for each unit in the sample" (p. 345, *emphasis* in the original).
+
+#### 18.3.1.1 An idealized outcome from a completely randomized experiment.
+
+Here's our version of the table in Figure 18.3, if `treatment` condition was assigned sequentially to every other participant.
+
+```{r}
+d %>% 
+  mutate(treatment = rep(0:1, times = 4)) %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1))
+```
+
+Granted the values, above, here would be our estimate of $\tau$.
+
+```{r, message = F}
+d %>% 
+  mutate(treatment = rep(0:1, times = 4)) %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1)) %>% 
+  group_by(treatment) %>% 
+  summarise(y = mean(y)) %>% 
+  pivot_wider(names_from = treatment, values_from = y) %>% 
+  mutate(tau = `1` - `0`)
+```
+
+We could also estimate this with the regression model $y_i = a + \tau z_i + \text{error}_i$.
+
+#### 18.3.1.2 A less idealized randomized result.
+
+Here we make the table of Figure 18.4, where randomization was imperfect.
+
+```{r}
+d %>% 
+  mutate(treatment = rep(c(1, 0, 1), times = c(3, 4, 1))) %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1))
+```
+Now `treatment` groups still differ notably by `age`.
+
+```{r, message = F}
+d %>% 
+  mutate(treatment = rep(c(1, 0, 1), times = c(3, 4, 1))) %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1)) %>% 
+  group_by(treatment) %>% 
+  summarise(mean_age = mean(age))
+```
+
+Granted the values, above, our estimate of $\tau$ comes out biased.
+
+```{r, message = F}
+d %>% 
+  mutate(treatment = rep(c(1, 0, 1), times = c(3, 4, 1))) %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1)) %>% 
+  group_by(treatment) %>% 
+  summarise(y = mean(y)) %>% 
+  pivot_wider(names_from = treatment, values_from = y) %>% 
+  mutate(tau = `1` - `0`)
+```
+
+## 18.4 Sampling distributions, randomization distributions, and bias in estimation
+
+> When considering the population average treatment effect, we can conceptualize drawing a random sample of size $n_1$ from a population to receive the treatment, drawing a random sample of size $n_0$ from the same population to receive the control, and taking the difference between the average response in each as an estimate of the population average treatment effect. If this were done over and over, the estimates would form a sampling distribution for this estimate. For the estimate to be unbiased, we would need the mean of this sampling distribution to be centered on the true $\tau_\text{PATE}$. A stricter criterion that would also lead to an unbiased treatment effect estimate would require the sampling distributions of the mean of $y$ for the control and treated units to be centered on the population average of $y_0$ and the population average of $y_1$, respectively.
+>
+> Even if an estimate is unbiased, this does not guarantee that the estimate from any particular random assignment will be close to the true value of the estimand, particularly when the sample is small. (pp. 346--347)
+
+## 18.5 Using additional information in experimental design
+
+"In many experimental settings, pre-treatment information is available that can be used in the experimental design to yield more precise and less biased estimates of treatment effects" (p. 347). The reason the `treatment` assignment from the data in Figure 18.3 yielded an unbiased estimate is because of how every two rows (e.g., 1 and 2, 3 and 4, ...) were effectively grouped by `age`. By assigning `treatment` to every other row, it was effectively randomized by *blocks*.
+
+### 18.5.1 Randomized blocks experiments.
+
+Here are the data for the expanded experiment of Figure 18.5, where `treatment` is not equal across `age` blocks.
+
+```{r}
+d <-
+  tibble(i         = c("Audrey", "Abigail", "Arielle", "Anna", "Bob", "Bill", "Burt", "Brad", "Caitlin", "Cara", "Cassie", "Cindy", "Dave", "Doug", "Dylan", "Derik"),
+         female    = rep(c(0, 1, 0, 1), each = 4),
+         age       = rep(4:7 * 10, each = 4),
+         treatment = rep(c(0, 1, 0, 1, 0, 1, 0, 1), times = c(3, 1, 3, 1, 1, 3, 1, 3)),
+         y0        = rep(14:17 * 10, each = 4),
+         y1        = rep(c(27:28, 31:32) * 5, each = 4)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1))
+
+d
+```
+
+Now the overall sample estimate for $\tau$ is biased.
+
+```{r, message = F}
+d %>% 
+  group_by(treatment) %>% 
+  summarise(y = mean(y)) %>% 
+  pivot_wider(names_from = treatment, values_from = y) %>% 
+  mutate(tau = `1` - `0`)
+```
+
+Here's what happens if we compute $\hat \tau_j$ within each of the $j$ `age` block.
+
+```{r, message = F}
+d %>% 
+  group_by(age, treatment) %>% 
+  summarise(y = mean(y)) %>% 
+  pivot_wider(names_from = treatment, values_from = y) %>% 
+  mutate(tau_j = `1` - `0`)
+```
+
+If we take the average of the $\hat \tau_j$'s, we'll get an unbiased estimate.
+
+```{r, message = F}
+d %>% 
+  group_by(age, treatment) %>% 
+  summarise(y = mean(y)) %>% 
+  pivot_wider(names_from = treatment, values_from = y) %>% 
+  mutate(tau_j = `1` - `0`) %>% 
+  ungroup() %>% 
+  summarise(tau = mean(tau_j))
+```
+
+You can also get an unbiased estimate by fitting the model
+
+$$y_i = a + \tau_\text{RB} z_i + \gamma_1 b_{1i} + \gamma_2 b_{2i} + \gamma_3 b_{3i} + \text{error}_i,$$
+
+where $\tau_\text{RB}$ is the focal parameter, the treatment effect given a random block design. The $a$ parameter is the typical intercept, and the three $\gamma$ parameters denote the deviations based on the block dummies. Here's how to fit the model with **brms**.
+
+```{r m18.1, warning = F, message = F}
+library(brms)
+
+m18.1 <-
+  brm(data = d,
+      y ~ 1 + treatment + factor(age),
+      seed = 18,
+      file = "fits/m18.01")
+```
+
+Check the model summary.
+
+```{r}
+print(m18.1)
+```
+
+The parameter in the `treatment` line is our causal effect, $\tau_\text{RB}$.
+
+#### 18.5.1.1 Motivations for randomization in blocks.
+
+#### 18.5.1.2 Defining blocks in practice.
+
+> How do we choose blocks when our goal is to increase statistical efficiency? The goal when creating blocks is to minimize the variation of each type of potential outcome, $y^0$ and $y^1$, within the block. (p. 349)
+
+### 18.5.2 Matched pairs experiments.
+
+Matched pairs randomized experiments are special cases of a randomized block design where each matched pair is a 2-unit block, such as in the case of twins. Within each pair, you randomize one to each of the two levels of treatment. This can make more efficient estimation due to the high homogeneity within blocks.
+
+### 18.5.3 Group or cluster-randomized experiments.
+
+> Sometimes it is difficult or problematic to randomize treatment assignments to individual units, and so researchers instead randomize groups or clusters to receive the treatment. This design choice might be motivated by how a treatment is implemented. For instance, group therapy strategies typically are implemented at the group level--that is, with every person in a group receiving the same treatment. (p. 349)
+
+### 18.5.4 Using design-relevant information in subsequent data analysis.
+
+Though blocking is sometimes more efficient than pure randomization, cluster randomizing is often less efficient.
+
+> It is best to include pre-treatment information in the design if this is feasible. But in any case, whether or not this information is accounted for in the design, it should be included in the analysis by including relevant pre-treatment information as predictors. (p. 350)
+
+## 18.6 Properties, assumptions, and limitations of randomized experiments
+
+> When the design yields no average differences between groups, a simple difference in means will yield an unbiased estimate of the sample average treatment effect, and a regression on treatment indicator, also adjusting for pre-treatment predictors, will also be unbiased but can do even better by reducing variance. (p. 350)
+
+### 18.6.1 Ignorability.
+
+#### 18.6.1.1 Completely randomized experiments.
+
+"In a completely randomized design, the treatment assignment is a random variable that is independent of the potential outcomes" (p. 350). This implies that there will be no difference, on average, in potential outcomes across repeated randomizations, a condition called *ignorability*.
+
+#### 18.6.1.2 Randomized blocks experiments.
+
+"When we randomize within blocks, the independence between potential outcomes and the treatment variable holds only conditional on block membership, $w$" (p. 351).
+
+#### 18.6.1.3 Matched pairs experiments.
+
+> The most straightforward approach to treatment effect estimation that accounts for the matched pairs design is to calculate pair-specific differences in outcomes, $d_j = y_j^T - y_j^C$ (where $y_j^T$ is the outcome of the treated unit in pair $j$ and $y_j^C$ is the outcome of the control unit in pair $j$), and then calculate an average of those $K$ differences, $\overline d = \frac{1}{K} \sum_{k=1}^K d_j$. Including a predictor for each pair makes such models noisy to estimate using simple regression; data from such designs can often be more efficiently fit using multilevel models. (p. 352)
+
+### 18.6.2 Efficiency.
+
+> The more similar the potential outcomes are across treatment groups, the *closer* our estimate will be on average to the value of the estimand. Said another way, the more similar are the units being compared across treatment groups, the smaller the variance of the randomization or sampling distribution will be. (p. 352, *emphasis* in the original)
+
+#### 18.6.2.1 Randomized blocks experiments.
+
+> Ideally, the randomized block experiment creates subgroups (blocks) within which the $y_i^0$'s are more similar to each other and the $y_i^1$'s are more similar to each other across treatment groups. This makes it possible to get sharper estimates of block-specific treatment effects, which can then be combined using a weighted average into an estimate of the average treatment effect across the entire experimental sample or population. (p. 352)
+
+#### 18.6.2.2 Increasing precision by adjusting for pre-treatment variables.
+
+Once again, here are the data from Figure 18.3.
+
+```{r, warning = F, message = F}
+d <-
+  tibble(i         = c("Audrey", "Anna", "Bob", "Bill", "Caitlin", "Cara", "Dave", "Doug"),
+         female    = c(1, 1, 0, 0, 1, 1, 0, 0),
+         age       = rep(4:7 * 10, each = 2),
+         treatment = rep(0:1, times = 4),
+         y0        = rep(14:17 * 10, each = 2),
+         y1        = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(y = ifelse(treatment == 0, y0, y1))
+
+d
+```
+
+On page 352, the authors commented on the standard errors for the models 
+
+$$
+\begin{align*}
+y_i & \sim \operatorname N(\mu_i, \sigma) \\
+\mu_i & = a + \tau\ \text{treatment}_i
+\end{align*}
+$$
+
+and
+
+$$
+\begin{align*}
+y_i & \sim \operatorname N(\mu_i, \sigma) \\
+\mu_i & = a + \tau\ \text{treatment}_i + b_1 \text{female}_i + b_2 \text{age}_i.
+\end{align*}
+$$
+
+Though they didn't show example code fitting these in the text, here we fit them with **brms**.
+
+
+```{r m18.2, warning = F, message = F}
+m18.2 <-
+  brm(data = d,
+      y ~ 1 + treatment,
+      seed = 18,
+      file = "fits/m18.02")
+
+m18.3 <-
+  brm(data = d,
+      y ~ 1 + treatment + female + age,
+      seed = 18,
+      file = "fits/m18.03")
+```
+
+Check the model summary.
+
+```{r}
+print(m18.2, robust = T)
+print(m18.3, robust = T)
+```
+
+The posterior mad sd values for our $\tau$ parameters are a little larger than those listed in the text. Let's compare what we get when fitting the models with OLS.
+
+```{r}
+lm(data = d,
+   y ~ 1 + treatment) %>% 
+  summary()
+
+lm(data = d,
+   y ~ 1 + treatment + female + age) %>% 
+  summary()
+```
+
+This time, the standard errors do match those in the text. *What gives?* With only eight data points, the likelihoods are very weak and our **brms** models are using default flat priors for the parameters of `class = b`. Yet across all four models, the point estimate for $\tau$ hovered consistently around the true value -7.5.
+
+### 18.6.3 Stable unit treatment value assumption (SUTVA): no interference among units and no hidden versions of the treatment.
+
+The *stable unit treatment value assumption* (SUTVA) is "the potential outcome for unit $i$ depends only on the treatment" (p. 353), which means the treatment status of a given participant does not effect the status of other participants. It also means that the kind or intensity of treatment is stable across time and participants.
+
+### 18.6.4 External validity: Difficulty of extrapolating to new individuals and situations.
+
+"To the extent that the sample is not representative of the population, and that the environment in the study does not reflect the outside world, we say that the design lacks *external validity*" (p. 353, *emphasis* in the original).
+
+### 18.6.5 How the experiment affects the participants.
+
+### 18.6.6 Missing data and noncompliance.
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
