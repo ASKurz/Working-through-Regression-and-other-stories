@@ -36,7 +36,7 @@ knitr::opts_chunk$set(fig.align = "center")
 
 ### 4.2.1 Parameters, estimands, and estimates.
 
-> In statistics jargon, *parameters* are the unknown numbers that determine a statistical model. For example, consider the model $yi = a + b x_i + \epsilon_i$, in which the errors $epsilon_i$ are normally distributed with mean 0 and standard deviation $\sigma$. The parameters in this model are $a$, $b$, and $\sigma$. The parameters $a$ and $b$ are called *coefficients*, and $\sigma$ is a called a *scale* or *variance parameter*....
+> In statistics jargon, *parameters* are the unknown numbers that determine a statistical model. For example, consider the model $yi = a + b x_i + \epsilon_i$, in which the errors $\epsilon_i$ are normally distributed with mean 0 and standard deviation $\sigma$. The parameters in this model are $a$, $b$, and $\sigma$. The parameters $a$ and $b$ are called *coefficients*, and $\sigma$ is a called a *scale* or *variance parameter*....
 >
 > An *estimand*, or *quantity of interest*, is some summary of parameters or data that somebody is interested in estimating. For example, in the regression model, $yi = a + b x_i + \text{error}$, the parameters $a$ and $b$ might be of interest--$a$ is the intercept of the model, the predicted value of $y$ when $x = 0$; and $b$ is the slope, the predicted difference in $y$, comparing two data points that differ by 1 in $x$. Other quantities of interest could be predicted outcomes for particular new data points, or combinations of predicted values such as sums, differences, averages, and ratios. 
 >
