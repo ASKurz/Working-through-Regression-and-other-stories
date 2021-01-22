@@ -1,0 +1,1733 @@
+---
+title: "Chapter 13: Logistic regression"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Logistic regression
+
+> Linear regression is an additive model, which does not work for binary outcomes--that is, data y that take on the values 0 or 1. To model binary data, we need to add two features to the base model $y = a + bx$: a nonlinear transformation that bounds the output between 0 and 1 (unlike $a + bx$, which is unbounded), and a model that treats the resulting numbers as probabilities and maps them into random binary outcomes. This chapter and the next describe one such model--logistic regression. (p. 217)
+
+## 13.1 Logistic regression with a single predictor
+
+On page 217, we read:
+
+> The *logistic* function,
+>
+> $$\operatorname{logit}(x) = \log \left (\frac{x}{1 - x} \right),$$
+>
+> maps the range $(0, 1)$ to $(-\infty, \infty)$ and is useful for modeling probabilities. Its inverse function, graphed in Figure 13.1a, maps back to the unit range:
+>
+> $$\operatorname{logit}^{-1}(x) = \log \left (\frac{e^x}{1 + e^x} \right).$$
+
+Base **R** already includes these functions, named as `qlogis()` and `plogis()`. Since the names aren't the most intuitive, we might follow the authors' lead and duplicate those functions, but with more straightforward names:
+
+```{r}
+logit <- qlogis 
+invlogit <- plogis
+```
+
+Now use our newly-named `invlogit()` function to make Figure 13.1.
+
+```{r, warning = F, message = F, fig.width = 7, fig.height = 3}
+library(tidyverse)
+library(patchwork)
+
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+# left
+p1 <-
+  tibble(x = seq(from = -6.5, to = 6.5, length.out = 100)) %>% 
+  mutate(invlogit = invlogit(x)) %>% 
+  
+  ggplot(aes(x = x, y = invlogit)) +
+  geom_line() +
+  geom_segment(x = -0.2, xend = 0.6,
+               y = .4, yend = .6,
+               arrow = arrow(length = unit(0.15, "cm")),
+               color = "grey50", size = 1/4) +
+  annotate(geom = "text",
+           x = 0.3, y = 0.5, label = "slope = 1/4", 
+           hjust = 0, size = 4, color = "grey50") +
+  scale_x_continuous(breaks = -3:3 * 2, expand = c(0, 0)) +
+  scale_y_continuous(expression(logit^-1*(x)), breaks = 0:5 / 5, 
+                     expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = expression(y==logit^-1*(x)))
+
+# right
+p2 <-
+  tibble(x = seq(from = -15, to = 23, length.out = 100)) %>% 
+  mutate(invlogit = invlogit(-1.40 + 0.33 * x)) %>% 
+  
+  ggplot(aes(x = x, y = invlogit)) +
+  geom_line() +
+  geom_segment(x = 3.04040404 + 0.6, xend = 5.34343434 + 0.6,
+               y = 0.402113472, yend = 0.589847100,
+               arrow = arrow(length = unit(0.15, "cm")),
+               color = "grey50", size = 1/4) +
+  annotate(geom = "text",
+           x = 5.1, y = 0.5, label = "slope = 0.33/4", 
+           hjust = 0, size = 4, color = "grey50") +
+  scale_x_continuous(breaks = -1:2 * 10, expand = c(0, 0)) +
+  scale_y_continuous(expression(logit^-1*(-1.40+0.33*x)), breaks = 0:5 / 5, 
+                     expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = expression(y==logit^-1*(-1.40+0.33*x)))
+
+# combine
+(p1 + p2) &
+  theme(axis.ticks.x = element_blank(),
+        plot.subtitle = element_text(hjust = .5))
+```
+
+### 13.1.1 Example: modeling political preference given income.
+
+Load the `nes.txt` data.
+
+```{r }
+nes <- read.table("ROS-Examples-master/NES/data/nes.txt", header = T)
+
+head(nes)
+```
+
+Note how the `nes` data contains values from multiple years (the `year` column). Since we only want to use data form 1991, we'll make a subset called `nes92`.
+
+```{r}
+nes92 <-
+  nes %>% 
+  filter(year == 1992) %>% 
+  drop_na(rvote, dvote) %>% 
+  filter(rvote == 1 | dvote == 1)
+
+dim(nes92)
+```
+
+Note how, with the `drop_na()` line, we excluded cases with missing data on either `rvote` or `dvote` columns. What may not be clear is that some cases neither selected a republican nor a democrat. With the second `filer()` line, we excluded those cases. Now the data are cleaned, we can fit a model.
+
+Much like with **rstanarm**, fitting this model with **brms** requires we specify `family = binomial`. We could have also explicitly specified the logit link, as Gelman et al did with their `link="logit"` code, in the text. But since **brms** defaults to the logit link when `family = binomial`, there was no need. The other important thing to notice is the left hand side of the `formula` argument, `rvote | trials(1)`. **brms** allows users to specify supplementary information about the criterion variable using the `y | fun(<variable>)` syntax, where `y` is the criterion, `fun()` is a generic stand-in for some function, and `<variable>` is a generic stand-in for either a variable in the data set or a value manually set by the user. In the case of logistic regression, we use the `trials()` function, which tells **brms** how many trials each value in the criterion `rvote` is out of. In the case of our data, that value is always one. In that case, you can simply manually add in a `1` within the `trials()` argument.
+
+```{r m13.1, warning = F, message = F}
+library(brms)
+
+m13.1 <-
+  brm(data = nes92,
+      family = binomial,
+      rvote | trials(1) ~ income,
+      seed = 13,
+      file = "fits/m13.01")
+```
+
+Check the summary.
+
+```{r}
+print(m13.1, robust = T)
+```
+
+We can get a quick plot of the model with `conditional_effects()`.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+conditional_effects(m13.1)
+```
+
+To customize the plot to look more like the one in Figure 13.2a, I prefer the `posterior_epred()` method.
+
+```{r, fig.width = 4.5, fig.height = 2.5, warning = F, message = F}
+library(tidybayes)
+
+# define the new data
+nd <- 
+  tibble(income = seq(from = -2, to = 8, length.out = 100),
+         row    = 1:100)
+
+# extract the posterior expectations
+posterior_epred(m13.1, newdata = nd) %>% 
+  data.frame() %>% 
+  pivot_longer(everything()) %>% 
+  mutate(row = str_remove(name, "X") %>% as.double()) %>% 
+  left_join(nd, by = "row") %>% 
+  group_by(income) %>% 
+  median_qi(value) %>% 
+  
+  # plot!
+  ggplot(aes(x = income)) +
+  geom_ribbon(aes(ymin = .lower, max = .upper),
+              fill = "grey75") +
+  geom_line(aes(y = value, size = income >= 1 & income <= 5)) +
+  geom_jitter(data = mutate(nes92, rvote = if_else(rvote == 0, 0.03, 0.97)),
+              aes(y = rvote),
+              size = 1/10, width = .3, height = .025) +
+  # just for fun, we'll annotate
+  annotate(geom = "text",
+           x = c(0, 6), y = .4, 
+           label = c("95% interval", "posterior mdn"),
+           size = 3) +
+  annotate(geom = "segment",
+           x = c(0, 6), xend = c(0.2, 5.7),
+           y = c(.36, .44), yend = c(.28, .6),
+           arrow = arrow(length = unit(0.15, "cm"))) +
+  scale_size_manual("data range?", values = c(1/4, 1.5), labels = c("no", "yes")) +
+  scale_fill_grey(start = 0.9, end = 0.6) +
+  scale_x_continuous(breaks = 1:5, labels = c("1\n(poor)", "2", "3", "4", "5\n(rich)"),
+                     expand = c(0, 0)) +
+  scale_y_continuous("Pr (Republican vote)", breaks = 0:5 / 5,
+                     expand = c(0, 0), limits = 0:1)
+```
+
+We'll make the right panel of the figure a couple sections down.
+
+### 13.1.2 The logistic regression model.
+
+> We would run into problems if we tried to fit a linear regression model, $X \beta + \text{error}$, to data $y$ that take on the values 0 and 1. The coefficients in such a model could be interpreted as differences in probabilities, but we could have difficulties using the model for prediction--it would be possible to have predicted probabilities below 0 or above 1--and information would be lost by modeling discrete outcomes as if they were continuous. (p. 219)
+
+If we ignore priors, one way to express the model we just fit is
+
+$$
+\begin{align*}
+\text{rvote}_i & \sim \operatorname{Binomial}(n = 1, p_i) \\
+\operatorname{logit}(p_i) & = a + b\ \text{income}_i,
+\end{align*}
+$$
+
+where the first line indicates we're modeling the criterion variable with the binomial likelihood (typical with logistic regression). The binomial likelihood has two arguments, $n$, which tells us how many trials each case is our of, and $p$, which is the probability of a 1 within a given trial. When the criterion variable is a series of 0's and 1's, $n$ is fixed to 1. If we take our focus form the binomial likelihood function, we might more express the model as
+
+$$\operatorname{Pr}(\text{rvote}_i = 1) = \operatorname{logit}^{-1}(a + b\ \text{income}_i),$$
+
+which Gelman et al more generically expressed as $\operatorname{Pr}(y_i = 1) = \operatorname{logit}^{-1}(X_i \beta)$. Since $\operatorname{Pr}(y_i = 1) = p_i$, we can also write the generic model as 
+
+$$\operatorname{logit}(p_i) = X_i \beta,$$
+
+which brings us back full circle to how we expressed our statistical model from above.
+
+Now use our `logit()` function to convert two values out of the probability metric.
+
+```{r}
+logit(c(.5, .6))
+```
+
+Here are two more.
+
+```{r}
+logit(c(.9, .93))
+```
+
+"In general, any particular change on the logit scale is compressed at the ends of the probability scale, which is needed to keep probabilities bounded between 0 and 1" (p. 219).
+
+### 13.1.3 Fitting the model using ~~stan_glm~~ `brms::brm()`and displaying uncertainty in the fitted model.
+
+To make Figure 20.3b, we'll make use of the `nsamples` argument within `posterior_epred()`. By setting `nsamples = 20`, we'll follow Gelman and colleges (p. 219), who took 20 random draws from the postrior.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+set.seed(13)
+
+posterior_epred(m13.1, 
+                newdata = nd,
+                nsamples = 20) %>% 
+  data.frame() %>% 
+  mutate(iter = 1:n()) %>% 
+  
+  pivot_longer(-iter) %>% 
+  mutate(row = str_remove(name, "X") %>% as.double()) %>% 
+  left_join(nd, by = "row") %>% 
+  
+  ggplot(aes(x = income)) +
+  geom_line(aes(y = value, group = iter),
+            size = 1/4, color = "grey50", alpha = 1/2) +
+  stat_function(fun = ~ invlogit(fixef(m13.1, robust = T)[1, 1] + fixef(m13.1, robust = T)[2, 1] * .x),
+                size = 1) +
+  geom_jitter(data = mutate(nes92, rvote = if_else(rvote == 0, 0.03, 0.97)),
+              aes(y = rvote),
+              size = 1/10, width = .3, height = .025) +
+  # just for fun, we'll annotate
+  annotate(geom = "text",
+           x = c(1, 5), y = c(.55, .35), 
+           label = c("some random\nposterior draw", "posterior mdn"),
+           size = 3) +
+  annotate(geom = "segment",
+           x = c(1, 5), xend = c(1, 5),
+           y = c(.46, .39), yend = c(.32, .54),
+           color = c("grey60", "black"), size = c(1/4, 1/2),
+           arrow = arrow(length = unit(0.15, "cm"))) +
+  scale_size_manual("data range?", values = c(1/4, 1.5), labels = c("no", "yes")) +
+  scale_fill_grey(start = 0.9, end = 0.6) +
+  scale_x_continuous(breaks = 1:5, labels = c("1\n(poor)", "2", "3", "4", "5\n(rich)")) +
+  scale_y_continuous("Pr (Republican vote)", breaks = 0:5 / 5,
+                     expand = c(0, 0), limits = 0:1) +
+  coord_cartesian(xlim = c(0.5, 5.5))
+```
+
+Alternatively, we might just take the first posterior draws from `posterior_samples()` and wrangle a bit.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+posterior_samples(m13.1) %>% 
+  slice(1:20) %>% 
+  mutate(iter = 1:n()) %>% 
+  expand(nesting(iter, b_Intercept, b_income),
+         income = seq(from = -2, to = 8, length.out = 100)) %>% 
+  
+  ggplot(aes(x = income)) +
+  geom_line(aes(y = invlogit(b_Intercept + b_income * income), group = iter),
+            size = 1/4, color = "grey50", alpha = 1/2) +
+  scale_x_continuous(breaks = 1:5, labels = c("1\n(poor)", "2", "3", "4", "5\n(rich)")) +
+  scale_y_continuous("Pr (Republican vote)", breaks = 0:5 / 5,
+                     expand = c(0, 0), limits = 0:1) +
+  coord_cartesian(xlim = c(0.5, 5.5))
+```
+
+## 13.2 Interpreting logistic regression coefficients and the divide-by-4 rule
+
+"Coefficients in logistic regression can be challenging to interpret because of the nonlinearity just noted" (p. 220).
+
+### 13.2.1 Evaluation at and near the mean of the data.
+
+Here's the model-implied probability of supporting candidate Bush, given you're in the largest `income` bracket.
+
+```{r}
+invlogit(fixef(m13.1, robust = T)[1, 1] + fixef(m13.1, robust = T)[2, 1] * 5)
+```
+
+Here's the same, given your at the observed mean of the `income` distribution
+
+```{r}
+invlogit(fixef(m13.1, robust = T)[1, 1] + fixef(m13.1, robust = T)[2, 1] * mean(nes92$income))
+```
+
+Here's the point estimate for the difference in probability for those for whom `income == 3` compared to those for whom `income == 2`.
+
+```{r}
+invlogit(fixef(m13.1, robust = T)[1, 1] + fixef(m13.1, robust = T)[2, 1] * 3) - invlogit(fixef(m13.1, robust = T)[1, 1] + fixef(m13.1, robust = T)[2, 1] * 2)
+```
+
+### 13.2.2 The divide-by-4 rule.
+
+> The logistic curve is steepest at its center, at which point $\alpha + \beta x = 0$ so that $\operatorname{logit}^{-1}(\alpha + \beta x) = 0.5$; see Figure 13.1. The slope of the curve--the derivative of the logistic function--is maximized at this point and attains the value $\beta e^0 / (1 + e^0)^2 = \beta / 4$. Thus, $\beta / 4$ is the maximum difference in $\operatorname{Pr}(y = 1)$ corresponding to a unit difference in $x$.
+>
+> As a rule of convenience, we can take logistic regression coefficients (other than the constant term) and divide them by 4 to get an upper bound of the predictive difference corresponding to a unit difference in $x$. This upper bound is a reasonable approximation near the midpoint of the logistic curve, where probabilities are close to 0.5. (p. 220)
+
+Here's what the divide-by-4 rule implies for our $\beta_\text{income}$ coefficient from our model `m13.1`.
+
+```{r}
+fixef(m13.1, robust = T)[2, 1] / 4
+```
+
+Thus, "a difference of 1 in income category corresponds to no more than an 8% positive difference in the probability of supporting Bush" (p. 220).
+
+### 13.2.3 Interpretation of coefficients as odds ratios.
+
+> Another way to interpret logistic regression coefficients is in terms of *odds ratios*. If two outcomes have the probabilities $(p, 1 - p)$, then $\frac{p}{1 - p}$ is called the *odds*... Dividing two odds, $\frac{p_1}{1 - p_1} / \frac{p_2}{1 - p_2}$, gives an odds ratio. (pp. 220--221, *emphasis* in the original)
+
+To give a sense, here's a plot of odds values corresponding to probabilities in the range $[.01, .99]$.
+
+```{r, fig.width = 4, fig.height = 3}
+tibble(p = seq(from = 0.01, to = .99, by = .01)) %>% 
+  mutate(odds = p / (1 - p)) %>% 
+  
+  ggplot(aes(x = p, y = odds)) +
+  geom_line() +
+  xlab(expression(italic(p)))
+```
+
+Here's the odds ratio for when you have two probabilities, one of .33 and other of .5.
+
+```{r}
+p1 <- .33
+p2 <- .5
+
+odds <- function(p) {
+  p / (1 - p)
+}
+
+odds(p1) / odds(p2)
+odds(p2) / odds(p1)
+```
+
+You'll note how the odds ratio depends on which variable is in the numerator. Here are the odds ratios when your two probabilities are .5 and .67.
+
+```{r}
+p1 <- .5
+p2 <- .67
+
+odds(p1) / odds(p2)
+odds(p2) / odds(p1)
+```
+
+"Exponentiated logistic regression coefficients can be interpreted as odds ratios" (p. 221). Here's what means if $\beta = 0.2$.
+
+```{r}
+exp(0.2)
+```
+
+"We find that the concept of odds can be somewhat difficult to understand, and odds ratios are even more obscure. Therefore we prefer to interpret coefficients on the original scale of the data when possible" (p. 221). I agree. Probabilities are the way to go.
+
+### 13.2.4 Coefficient estimates and standard errors.
+
+Figure 13.3 is a throwback to the first plot from Chapter 4.
+
+```{r, warning = F, message = F, fig.width = 5.5, fig.height = 2.25}
+labels <- c("-2~s.e.", "hat(beta)", "2~s.e.")
+
+tibble(x = seq(from = -5, to = 5, by = .01)) %>% 
+  mutate(d = dnorm(x, mean = 0, sd = 1)) %>% 
+  
+  ggplot(aes(x = x, y = d)) +
+  geom_line() +
+  annotate(geom = "text",
+           x = 0, y = .2,
+           label = "''%<-%hat(beta)%+-%1~s.e.%->%''",
+           parse = T) +
+  scale_x_continuous(NULL, breaks = c(-2, 0, 2),
+                     labels = function(x) parse(text = labels)) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Distribution representing uncertainty in an estimated regression coefficient")
+```
+
+Here's what that looks like for our $\beta_\text{income}$ posterior.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+# x-axis breaks and annotation
+breaks <-
+  tibble(breaks = fixef(m13.1)[2, c(3, 1, 4)]) %>% 
+  mutate(labels = round(breaks, digits = 2),
+         text   = c("-2~s.e.", "hat(beta)", "+2~s.e."))
+
+# plot!
+posterior_samples(m13.1) %>% 
+  ggplot() +
+  stat_slab(aes(x = b_income)) +
+  geom_text(data = breaks,
+            aes(x = breaks, label = text),
+            y = 0.05, parse = T, color = "white", size = 3) +
+  scale_x_continuous(expression(beta[income]), 
+                     breaks = pull(breaks, breaks),
+                     labels = pull(breaks, labels)) +
+  scale_y_continuous(NULL, breaks = NULL,
+                     expand = expansion(mult = c(0, 0.05)))
+```
+
+Here's that standard error, as operationalized as the posterior standard deviation.
+
+```{r}
+fixef(m13.1)[2, 2]
+```
+
+### 13.2.5 Statistical significance.
+
+> As with linear regression, an estimate is conventionally labeled as statistically significant if it is at least 2 standard errors away from zero or, more formally, if its 95% confidence interval excludes zero. 
+>
+> For reasons discussed in earlier chapters, we do *not* recommend using statistical significance to make decisions in logistic regression about whether to include predictors or whether to interpret effects as real. (pp. 221--222, *emphasis* in the original)
+
+### 13.2.6 Displaying the results of several logistic regressions.
+
+We can refit our `m13.1` for multiple election years by using the `purrr::map()` method and `brms::update()`.
+
+```{r, echo = F}
+# save(fits, file = "fits/fits13.01.rda")
+load("fits/fits13.01.rda")
+```
+
+
+```{r, eval = F}
+fits <-
+  nes %>% 
+  filter(year %in% seq(from = 1952, to = 2000, by = 4)) %>% 
+  drop_na(rvote, dvote) %>% 
+  filter(rvote == 1 | dvote == 1) %>% 
+  select(year, rvote, dvote, income) %>% 
+  nest(data = c(rvote, dvote, income)) %>% 
+  mutate(f = map(data, ~update(m13.1, newdata = ., seed = 13, cores = 4) %>% 
+                   fixef() %>% 
+                   data.frame() %>% 
+                   rownames_to_column("parameter")))
+```
+
+Now make the coefficient plot of Figure 13.4.
+
+```{r, fig.width = 4.5, fig.height = 3}
+fits %>% 
+  select(-data) %>% 
+  unnest(f) %>% 
+  filter(parameter == "income") %>% 
+  
+  ggplot(aes(x = year, y = Estimate, ymin = Estimate - Est.Error, ymax = Estimate + Est.Error)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_pointrange(size = 1/4, fatten = 3/2) +
+  labs(x = "Year",
+       y = "Coefficient of income")
+```
+
+## 13.3 Predictions and comparisons
+
+As with conventional regression we can use 
+
+* `predict()` for point predictions for the expected value of a new observation, 
+* `posterior_linpred()` posterior simulations representing uncertainty about the linear predictor $X^\text{new} \beta$, 
+* `posterior_epred()` for the predicted probability $\operatorname{logit}^{-1}(X^\text{new} \beta)$, and 
+* `posterior_predict()` for the random binary outcome $y^\text{new}$.
+
+### 13.3.1 Point prediction using `predict`.
+
+Here we use `predict()` to predict the expected vote preference for someone for whom `income = 5`.
+
+```{r}
+new <- tibble(income = 5)
+
+set.seed(13)
+
+predict(m13.1, 
+        newdata = new)
+```
+
+That's about 56% change preference for Bush. Be warned that unlike with `rstanarm::predict()`, `brms::predict()` does **not** have a `type` argument. Thus, the results are always on the same scale as the variable, not the linear model. If you want that point estimate in the log-odds scale, you'll have to transform using `logit()`.
+
+```{r}
+set.seed(13)
+
+predict(m13.1, 
+        newdata = new)[1] %>% 
+  logit()
+```
+
+### 13.3.2 Linear predictor with uncertainty using `posterior_linpred`.
+
+Here's what happens when we use `posterior_linpred()`.
+
+```{r}
+linpred <- posterior_linpred(m13.1, newdata = new)
+
+str(linpred)
+```
+
+We returned a vector of posterior draws for $a + b \times 5$. Here's a a plot of the results.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+tibble(linpred = linpred) %>% 
+  ggplot(aes(x = linpred, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(italic(a)+italic(b)%*%5))
+```
+
+### 13.3.3 Expected outcome with uncertainty using `posterior_epred`.
+
+Now see what we get with `posterior_epred()`.
+
+```{r}
+epred <- posterior_epred(m13.1, newdata = new)
+
+str(epred)
+```
+
+Now we have a vector of probabilities, $\operatorname{Pr}(y_\text{new} | x_\text{new})$. Here's that that looks like in a plot.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+tibble(epred = epred) %>% 
+  ggplot(aes(x = epred, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(Pr(italic(y)^new*'|'*italic(x)^new)))
+```
+
+Here are the mean and standard deviation values for `epred`.
+
+```{r}
+tibble(epred = epred) %>% 
+  summarise(mean = mean(epred),
+            sd = sd(epred))
+```
+
+Also note `posterior_linpred()` and `posterior_epred()` can be converted to one another using the `logit()` and `invlogit()` functions. Check it out.
+
+```{r}
+tibble(linpred = linpred,
+       epred   = epred) %>% 
+  mutate(`invlogit(linpred)` = invlogit(linpred),
+         `logit(epred)`     = logit(epred))
+```
+
+### 13.3.4 Predictive distribution for a new observation using `posterior_predict`.
+
+Here's what happens when we use `posterior_predict()`.
+
+```{r}
+postpred <- posterior_predict(m13.1, newdata=new)
+
+str(postpred)
+```
+
+We got a vector of 0's and 1's. Here they are in a bar chart.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+tibble(postpred = postpred %>% as.factor()) %>%
+  count(postpred) %>% 
+  mutate(percent = str_c(round(100 * (n / sum(n)), digits = 3), "%")) %>% 
+  
+  ggplot(aes(x = postpred)) +
+  geom_col(aes(y = n)) +
+  geom_text(aes(y = n + 75, label = percent),
+            size = 3) +
+  scale_y_continuous("count", expand = expansion(mult = c(0, 0.05)))
+```
+
+Here's the mean.
+
+```{r}
+tibble(postpred = postpred) %>% 
+  summarise(mean = mean(postpred))
+```
+
+You could also say that's $\operatorname E (y_\text{new} | x_\text{new})$.
+
+### 13.3.5 Prediction given a range of input values.
+
+We can use all of the above methods over a range of $X^\text{new}$ values, too.
+
+```{r}
+new <- tibble(income = 1:5)
+
+set.seed(13)
+
+pred     <- predict(m13.1, newdata = new) 
+linpred  <- posterior_linpred(m13.1, newdata = new) 
+epred    <- posterior_epred(m13.1, newdata = new) 
+postpred <- posterior_predict(m13.1, newdata = new)
+```
+
+Here's what we end up with.
+
+```{r}
+str(pred)
+str(linpred)
+str(epred)
+str(postpred)
+```
+
+Whereas `pred` contains one *row* for each $X^\text{new}$ value, the other three objects contain one *column* for each $X^\text{new}$ value.
+
+We might use `epred` to see how many of our posterior draws support the hypothesis $\operatorname{Pr} (y_\text{new} | \text{income} = 5) > \operatorname{Pr} (y_\text{new} | \text{income} = 4)$.
+
+```{r}
+epred %>% 
+  data.frame() %>% 
+  count(X5 > X4)
+```
+
+Turns out this was always the case. That'd be the same as a probability of 1.
+
+```{r}
+epred %>% 
+  data.frame() %>%
+  summarise(p = mean(X5 > X4))
+```
+
+But we might want the median and 95% percentile summaries for the difference between `epred[, 5]` and `epred[, 4]`.
+
+```{r}
+epred %>% 
+  data.frame() %>%
+  median_qi(X5 - X4)
+```
+
+Here's what that looks like as a full posterior distribution.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+epred %>% 
+  data.frame() %>% 
+  mutate(difference = X5 - X4) %>% 
+  
+  ggplot(aes(x = difference, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(Pr(italic(y)^new*'|'*income==5)-Pr(italic(y)^new*'|'*income==4)))
+```
+
+With `postpred`, we can see how many people would endorse Bush across all levels of $X^\text{new}$, within a given iteration.
+
+```{r}
+postpred %>% 
+  data.frame() %>% 
+  mutate(total = rowSums(.)) %>% 
+  head()
+```
+
+Here's the model-implied probability at least three persons will endorse Bush.
+
+```{r}
+postpred %>% 
+  data.frame() %>% 
+  mutate(total = rowSums(.)) %>% 
+  summarise(p_at_least_3 = mean(total >= 3))
+```
+
+### 13.3.6 Logistic regression with just an intercept.
+
+"Logistic regression with just an intercept is equivalent to the estimate of a proportion" (p. 224). We'll test that with some data.
+
+```{r}
+simple <- tibble(y = rep(0:1, times = c(40, 10)))
+
+glimpse(simple)
+```
+
+Fit the intercept-only model.
+
+```{r m13.2, warning = F, message = F}
+m13.2 <-
+  brm(data = simple,
+      family = binomial,
+      y | trials(1) ~ 1,
+      seed = 13,
+      file = "fits/m13.02")
+```
+
+Check the summary.
+
+```{r}
+print(m13.2, robust = T)
+```
+
+Here we convert the intercept into the probability metric using `invlogit()`.
+
+```{r}
+fixef(m13.2, robust = T)[, -2] %>% invlogit()
+```
+
+That matches up with the sample statistic.
+
+```{r}
+simple %>% 
+  summarise(p = mean(y))
+```
+
+Here are the point estimates for $\operatorname{logit}^{-1}(\hat \beta \pm \text{s.e.})$.
+
+```{r}
+invlogit(fixef(m13.2, robust = T)[, 1] + fixef(m13.2, robust = T)[, 2])
+invlogit(fixef(m13.2, robust = T)[, 1] - fixef(m13.2, robust = T)[, 2])
+```
+
+Here we compute the summary for the probability using the `posterior_epred()` method.
+
+```{r}
+new <- tibble(x = 0)
+
+posterior_epred(m13.2, newdata = new) %>% 
+  data.frame() %>% 
+  summarise(mean = mean(epred), 
+            sd = sd(epred))
+```
+
+#### 13.3.6.1 Data on the boundary.
+
+Now see what happens when the data are at the boundary, where the criterion is always 0.
+
+```{r}
+simple <- tibble(y = rep(0:1, times = c(50, 0)))
+
+glimpse(simple)
+```
+
+Fit the model.
+
+```{r m13.3, warning = F, message = F}
+m13.3 <-
+  brm(data = simple,
+      family = binomial,
+      y | trials(1) ~ 1,
+      seed = 13,
+      file = "fits/m13.03")
+```
+
+Check the summary.
+
+```{r}
+print(m13.3, robust = T)
+```
+
+I believe the reason our results differ a little from those in the text is due to differences in the default priors. Here's the 95% interval, on the probability scale.
+
+```{r}
+fixef(m13.3, robust = T)[, -2] %>% invlogit() %>% round(digits = 3)
+```
+
+We might compare that to the maximum likelihood formula
+
+$$
+\hat p \pm \sqrt{\hat p (1 - \hat p) / (n + 4)}, \;\;\; \text{where} \\
+\hat p = (y + 2) / (n + 4).
+$$
+
+Here we do that by hand.
+
+```{r}
+y <- 0
+n <- 50
+
+p_hat <- (y + 2) / (n + 4)
+
+ll <- p_hat - sqrt(p_hat * (1 - p_hat) / (n + 4))
+ul <- p_hat + sqrt(p_hat * (1 - p_hat) / (n + 4))
+
+c(p_hat, ll, ul) %>% round(digits = 3)
+```
+
+### 13.3.7 Logistic regression with a single binary predictor.
+
+"Logistic regression on an indicator variable is equivalent to a comparison of proportions" (p. 225)
+
+Define the new data.
+
+```{r}
+simple <- 
+  tibble(x = rep(0:1, times = c(50, 60)),
+         y = rep(c(0:1, 0:1), times = c(40, 10, 40, 20)))
+```
+
+Here are the sample proportions, by `x`.
+
+```{r, message = F}
+simple %>% 
+  group_by(x) %>% 
+  summarise(p = mean(y))
+```
+
+Fit the logistic regression model with the single binary predictor, `x`.
+
+```{r m13.4, warning = F, message = F}
+m13.4 <-
+  brm(data = simple,
+      family = binomial,
+      y | trials(1) ~ 1 + x,
+      seed = 13,
+      file = "fits/m13.04")
+```
+
+Check the summary.
+
+```{r}
+print(m13.4, robust = T)
+```
+
+Here is the `posterior_epred()` method to find the posterior mean and standard deviation for the difference in probability between the two levels of `x`.
+
+```{r}
+new <- tibble(x = 0:1)
+
+posterior_epred(m13.4, newdata = new) %>% 
+  data.frame() %>% 
+  set_names("p0", "p1") %>% 
+  mutate(difference = p1 - p0) %>% 
+  summarise(mean = mean(difference),
+            sd = sd(difference))
+```
+
+Using the formulas from Chapter 4, where we see the classical estimate for the standard error of a proportion is
+
+$$\text{standard error of a proportion} = \sqrt{\hat p (1 - \hat p) / n},$$
+
+and the classical estimate for the standard error for a difference in proportions is
+
+$$\text{standard error of the difference} = \sqrt{\text{se}_1^2 + \text{se}_2^2},$$
+
+we can compute the classical estimate analogues to our posterior mean and standard deviation values like so.
+
+```{r}
+p_hat_0 <- 10 / (40 + 10)
+p_hat_1 <- 20 / (40 + 20)
+
+p_had_dif <- p_hat_1 - p_hat_0
+
+se_0 <- sqrt(p_hat_0 * (1 - p_hat_0) / (40 + 10))
+se_1 <- sqrt(p_hat_1 * (1 - p_hat_1) / (40 + 20))
+
+sd_dif <- sqrt(se_0^2 + se_1^2)
+
+c(p_had_dif, sd_dif)
+```
+
+## 13.4 Latent-data formulation
+
+With latent-variable formulation,
+
+> each discrete outcome $y_i$ is associated with a continuous, unobserved outcome $z_i$ , defined as follows:
+> 
+> $$
+> \begin{align*}
+> y_i & = \left \{
+>   \begin{array}{@{}ll@{}}
+>     1 & \text{if}\ z_i > 0 \\
+>     0 & \text{if}\ z_i < 0
+>   \end{array} \right. \\
+> z_i & = X_i \beta + \epsilon_i, 
+> \end{align*}
+> $$
+> 
+> with independent errors $\epsilon_i$ that have the *logistic* probability distribution. The logistic distribution is shown in Figure 13.5 and is defined so that
+> 
+> $$\operatorname{Pr}(\epsilon_i < x) = \operatorname{logit}^{-1} (x)\ \text{for all}\ x.$$
+> 
+> Thus, $\operatorname{Pr}(y_i = 1) = \operatorname{Pr}(z_i > 0) = \operatorname{Pr}(\epsilon_i > -X_i \beta) = \operatorname{logit}^{-1}(X_i \beta)$. (p. 226, *emphasis* in the original)
+
+We can plot the logistic density function of Figure 13.5 with aid from the `dlogis()` function.
+
+```{r, fig.height = 3, fig.width = 5.5}
+tibble(x = seq(from = -7, to = 7, length.out = 200)) %>% 
+  mutate(d = dlogis(x, location = 0, scale = 1)) %>% 
+  
+  ggplot(aes(x = x, y = d)) +
+  geom_line() +
+  scale_x_continuous(NULL, breaks = -3:3 * 2, expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Logistic probability density function")
+```
+
+Now here's our version of Figure 13.6, the probability density function of the latent variable $z_i$ when the linear predictor, $X_i \beta$, is equal to -1.07. 
+
+```{r, fig.height = 3, fig.width = 5.5}
+tibble(x = seq(from = -7, to = 7, length.out = 201)) %>% 
+  mutate(d = dlogis(x, location = -1.07, scale = 1)) %>% 
+  
+  ggplot(aes(x = x, y = d)) +
+  geom_ribbon(aes(ymin = 0, ymax = d, fill = x > 0)) +
+  geom_line() +
+  scale_fill_manual(values = c("white", "grey67"), breaks = NULL) +
+  scale_x_continuous(NULL, breaks = -3:3 * 2, expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Latent variable formulation of logit")
+```
+
+We can use our `invlogit()` function to compute the proportion of that density that's within the gray shaded region.
+
+```{r}
+invlogit(-1.07)
+```
+
+### 13.4.1 Interpretation of the latent variables.
+
+### 13.4.2 Nonidentifiability of the latent scale parameter.
+
+Similar to the Gaussian, the logistic density function is parameterized in terms of location ($\mu$) and scale ($s$). The latent-variable logistic regression model
+
+$$
+z_i = X_i \beta + \epsilon_i, \; \epsilon_i \sim \operatorname{Logistic}(0, s = 1) 
+$$
+
+is very close to the conventional regression model
+
+$$
+z_i = X_i \beta + \epsilon_i, \; \epsilon_i \sim \operatorname{Normal}(0, 
+\sigma = 1.6).
+$$
+
+It might be easiest to explore that in a plot.
+
+```{r, fig.height = 3, fig.width = 5.5}
+tibble(x = seq(from = -7, to = 7, length.out = 200)) %>% 
+  mutate(l = dlogis(x, location = 0, scale = 1),
+         n = dnorm(x, mean = 0, sd = 1.6)) %>% 
+  pivot_longer(l:n, values_to = "d") %>% 
+  mutate(likelihood = if_else(name == "l", "Logistic", "Normal")) %>% 
+  
+  ggplot(aes(x = x, ymin = 0, ymax = d, fill = likelihood)) +
+  geom_ribbon(alpha = 1/2) +
+  scale_fill_viridis_d(option = "A", begin = .25, end = .75) +
+  scale_x_continuous(NULL, breaks = -3:3 * 2, expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = "Overlapping logistic and normal density functions") +
+  theme(legend.position = c(.9, .8))
+```
+
+The logistic has slightly thicker tails. Unlike with conventional regression, the latent-variable framework for binomial data will not allow one to directly estimate $\sigma$ independently from $\beta$. The model
+
+> has an essential indeterminacy when fit to binary data, and it is standard to resolve this by setting the variance parameter $\sigma$ to a fixed value such as 1.6, chosen because the normal distribution with standard deviation 1.6 is close to the unit logistic distribution. (p. 228)
+
+## 13.5 Maximum likelihood and Bayesian inference for logistic regression
+
+### 13.5.1 Maximum likelihood using iteratively weighted least squares.
+
+### 13.5.2 Bayesian inference with a uniform prior distribution.
+
+> If the prior distribution on the parameters is uniform, then the posterior density is proportional to the likelihood function, and the posterior mode--the vector of coefficients $\beta$ that maximizes the posterior density--is the same as the maximum likelihood estimate. (p. 228)
+
+### 13.5.3 Default prior in ~~stan_glm~~ `brms::brm()`
+
+Similar to `rstanarm::stan_glm()`, the **brms** `brm()` function defaults to weakly informative priors on the intercept. However, the current default priors for the $\beta$ coefficients are flat. If there is ever any question about the exact default priors used in a model, use the `get_prior()` function. For example, here is the `get_prior()` output for the last model we fit.
+
+```{r}
+get_prior(
+  data = simple,
+  family = binomial,
+  y | trials(1) ~ 1 + x
+  )
+```
+
+As expected, the prior for the `x` coefficient is flat. The intercept was assigned $t(3, 0, 2.5)$.
+
+### 13.5.4 Bayesian inference with some prior information.
+
+"When prior information is available, it can be used to increase the precision of estimates and predictions" (p. 229). Say you have a simple univariable logistic model where you expect the $\beta$ parameter will likely fall between 0 and 1. The $\operatorname N(0.5, 0.5)$ prior would be a good candidate in that the bulk of the probability mass would reside between 0 and 1, but it would still be possible the the coefficient to exceed those bounds. Here's what that might look like.
+
+```{r, fig.height = 3, fig.width = 5.5}
+tibble(x = seq(from = -1, to = 2, by = 0.01)) %>% 
+  mutate(d = dnorm(x, mean = 0.5, sd = 0.5)) %>% 
+  
+  ggplot(aes(x = x, y = d)) +
+  geom_ribbon(aes(ymin = 0, ymax = d, fill = x > 0 & x < 1)) +
+  geom_line() +
+  annotate(geom = "text",
+           x = 0.5, y = 0.35,
+           label = "We think\nthe parameter will\nbe somewhere in here.",
+           color = "white") +
+  scale_fill_manual(values = c("white", "grey67"), breaks = NULL) +
+  scale_x_continuous(NULL, expand = c(0, 0)) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  labs(subtitle = expression(The~Normal(0.5*', '*0.5)~prior))
+```
+
+That gray zone contains about 68% of the probability mass. Verify that with `pnorm()`.
+
+```{r}
+pnorm(1, mean = 0.5, sd = 0.5) - pnorm(0, mean = 0.5, sd = 0.5)
+```
+
+Here's the probability mass this prior places between -0.5 and 1.5.
+
+```{r}
+pnorm(1.5, mean = 0.5, sd = 0.5) - pnorm(-0.5, mean = 0.5, sd = 0.5)
+```
+
+### 13.5.5 Comparing maximum likelihood and Bayesian inference using a simulation study.
+
+To follow along with the text, we'll make our own version of the simulation code. Before doing so, it will help if we first fit a simple logistic regression model following the format in the simulation.
+
+```{r m13.5}
+m13.5 <-
+  brm(data = fake,
+      family = binomial,
+      y | trials(1) ~ 1 + x,
+      prior = prior(normal(0.5, 0.5), class = b),
+      seed = 13,
+      file = "fits/m13.05")
+```
+
+Check the results.
+
+```{r}
+print(m13.5, robust = T)
+```
+
+The whole reason for this step is so we can avoid re-compilation by way of `brms::update()`. Now make our version of the `bayes_sim()` function.
+
+```{r}
+bayes_sim <- function(n, a = -2, b = 0.8, seed = 1, digits = 2) {
+  
+  # simulate the data
+  n <- n
+  a <- a
+  b <- b
+  
+  set.seed(seed)
+  
+  fake <-
+    tibble(x = runif(n, min = -1, max = 1)) %>% 
+    mutate(z = rlogis(n, location = a + b * x, scale = 1)) %>% 
+    mutate(y = if_else(z > 0, 1, 0))
+  
+  # fit the frequentist glm
+  glm_fit <-
+    glm(data = fake, 
+        family = binomial(link = "logit"), 
+        y ~ x) 
+  
+  # fit the Bayesian model with `brms::update()`
+  brm_fit <- 
+    update(m13.5, 
+           newdata = fake, 
+           seed = 13, 
+           refresh = 0, open_progress = F)
+  
+  # wrangle the result summary
+  coefs <-
+    bind_rows(
+      # glm
+      broom::tidy(glm_fit)[, 1:3] %>% 
+        set_names("term", "est.", "s.e.") %>% 
+        mutate(`function` = "glm") %>% 
+        select(`function`, everything()),
+      
+      # brm
+      fixef(brm_fit, robust = T)[, 1:2] %>% 
+        data.frame() %>% 
+        rownames_to_column() %>% 
+        set_names("term", "est.", "s.e.") %>% 
+        mutate(`function` = "brm") %>% 
+        select(`function`, everything())
+    ) %>% 
+    mutate_if(is.double, round, digits = digits)
+  
+  # return the summary
+  return(coefs)
+  
+}
+```
+
+As indicated in the text, this function will not run properly when `n = 0`.
+
+```{r, eval = F}
+bayes_sim(n = 0)
+```
+
+Here's an example of the results when `n = 10`.
+
+```{r, message = F}
+bayes_sim(n = 10)
+```
+
+For simplicity, this output glosses over the distinctions between GLM estimates and Bayesian posterior means and between GLM standard errors and Bayesian mad sd's. Anyway, our results are a little different from those in the text due to simulation variance. Yet the general pattern held: The Bayesian posteriors were more certain than those from maximum likelihood. Here are the results when `n = 100`.
+
+```{r, message = F}
+bayes_sim(n = 100,
+          # we can adjust the `digits`
+          digits = 1)
+```
+
+The maximum likelihood estimate is still extreme, but the standard errors shrank a bit. Now set `n = 1000`.
+
+```{r, message = F}
+bayes_sim(n = 1000,
+          # we can change the `seed`
+          seed = 13)
+```
+
+The two have nearly converged. "In this particular example, once $n$ is as large as 1000, the prior distribution doesn't really make a difference" (p. 230).
+
+## 13.6 Cross validation and log score for logistic regression
+
+> We can use cross validation to avoid the overfitting associated with using the same data for model fitting and evaluation. Thus, rather than evaluating log predictive probabilities directly, we can compute leave-one-out (LOO) log prediction probabilities, which can be used to compute the LOO log score (or, if desired, the LOO Brier score, LOO $R^2$, or any other measure of fit). (pp. 230--231)
+
+### 13.6.1 Understanding the log score for discrete predictions.
+
+> Consider the following scenario: We fit a logistic regression model with estimated parameters $\hat \beta$ and apply it to $n^\text{new}$ new data points with predictor matrix $X^\text{new}$, thus yielding a vector of predictive probabilities $p^\text{new} = \operatorname{logit}^{-1}(X_i^\text{new}, \hat \beta)$. We then find out the outcomes $y^\text{new}$ for the new cases and evaluate the model fit using
+> 
+> \text{out-of-sample log score} = \sum_{i = 1}^{n^\text{new}} \left \{
+>   \begin{array}{@{}ll@{}}
+>     \log p_i^\text{new} & \text{if}\ y^\text{new} = 1 \\
+>     \log (1 - p_i^\text{new}) & \text{if}\ y^\text{new} = 0.
+>   \end{array} \right.
+> 
+> The same idea applies more generally to any statistical model: the predictive log score is the sum of the logarithms of the predicted probabilities of each data point. 
+> 
+> Probabilities are between 0 and 1, and the logarithm of any number less than 1 is negative, with $\log(1) = 0$. Thus the log score is necessarily negative (except in the trivial case of a model that predicts events with perfect probabilities of 1). In general, higher values of log score are better.
+(p. 231)
+
+Here's how to use that formula in the simple case where we have a population parameter $p = .5$.
+
+```{r}
+(0.5 * log(0.5) + 0.5 * log(0.5))
+```
+
+For this simple null model, $\log 0 = -0.693$.
+
+Here are the probabilities for the model $\operatorname{logit}^{-1}(0.4 + x_i)$, where $x$ can be either 0 or 1.
+
+```{r}
+invlogit(0.4 + c(0, 1))
+```
+
+Given these two probabilities are on target with the population parameters and given the population consists of an even $50/50$ mix of each, here's how we can use the formula from above to compute the expected log score for a new observation chosen at random.
+
+```{r}
+0.5 * (0.8 * log(0.8) + 0.2 * log(0.2)) + 0.5 * (0.6 * log(0.6) + 0.4 * log(0.4))
+```
+
+Here's teh difference in these two log scores.
+
+```{r}
+log_score_1 <- (0.5 * log(0.5) + 0.5 * log(0.5))
+log_score_2 <- 0.5 * (0.8 * log(0.8) + 0.2 * log(0.2)) + 0.5 * (0.6 * log(0.6) + 0.4 * log(0.4))
+
+log_score_2 - log_score_1
+```
+
+This is "an improvement of about 1 in the log score per 10 data points" (p. 231).
+
+### 13.6.2 Log score for logistic regression.
+
+Back to the `nes92` data from Section 13.1, for which there are 1,179 cases.
+
+```{r}
+n <- count(nes92)
+n
+```
+
+Here is the log score for the full sample given a null model $p = .5$.
+
+```{r}
+log_score_null <- 1179 * log(.5)
+log_score_null
+```
+
+Now consider a model based simply on the observed percentages of Clinton and Bush votes.
+
+```{r}
+nes92 %>% 
+  mutate(vote = if_else(dvote == 1, "Clinton", "Bush")) %>% 
+  count(vote) %>% 
+  mutate(percent = (100 * n / sum(n)) %>% round(digits = 1))
+```
+Now compute the log score.
+
+```{r}
+477 * log(0.405) + 702 * log(.595)
+```
+
+Time to fit an intercept-only model for `rvote`.
+
+```{r m13.6}
+m13.6 <-
+  brm(data = nes92,
+      family = binomial,
+      rvote | trials(1) ~ 1,
+      seed = 13,
+      file = "fits/m13.06")
+```
+
+Check the results.
+
+```{r}
+print(m13.6, robust = T)
+```
+
+Here's the `brms::predict()` workflow to sum the logs of the predicted probabilities.
+
+```{r}
+# compute the posterior predictive probabilities for each case
+set.seed(13)
+pred <- predict(m13.6)[, 1]
+
+# isolate the `rvote` values
+y <- pull(nes92, rvote)
+
+# compute the sum
+log_score_m13.6 <- sum(y * log(pred) + (1 - y) * log(1 - pred))
+log_score_m13.6
+```
+
+Now fit the new model with `income` as a predictor.
+
+```{r m13.7}
+m13.7 <-
+  brm(data = nes92,
+      family = binomial,
+      rvote | trials(1) ~ income,
+      seed = 13,
+      file = "fits/m13.07")
+```
+
+Check the results.
+
+```{r}
+print(m13.7, robust = T)
+```
+
+Compute the new log score.
+
+```{r}
+# compute the posterior predictive probabilities for each case
+set.seed(13)
+pred <- predict(m13.7)[, 1]
+
+# compute the sum
+log_score_m13.7 <- sum(y * log(pred) + (1 - y) * log(1 - pred))
+log_score_m13.7
+```
+
+Here's the per-observation improvement in log score in the intercept-only model, `m13.6`, versus the null model.
+
+```{r}
+(log_score_null - log_score_m13.6) / pull(n)
+```
+
+Here's the per-observation improvement in log score for the univariable `income` model, versus the intercept-only model.
+
+```{r}
+(log_score_m13.6 - log_score_m13.7) / pull(n)
+```
+
+Here we compute the LOO estimates for `m13.6` and `m13.7`.
+
+```{r}
+m13.6 <- add_criterion(m13.6, "loo")
+m13.7 <- add_criterion(m13.7, "loo")
+```
+
+Their summaries are as follows.
+
+```{r}
+loo(m13.6)
+loo(m13.7)
+```
+
+The `elpd_loo` estimates are just below the log scores.
+
+```{r}
+log_score_m13.6
+log_score_m13.7
+```
+
+## 13.7 Building a logistic regression model: wells in Bangladesh
+
+Load the `wells.csv` data.
+
+```{r, message = F}
+wells <- read_csv("ROS-Examples-master/Arsenic/data/wells.csv")
+
+glimpse(wells)
+```
+
+### 13.7.1 Background.
+
+Given the provided data, it's not clear we can reproduce the nice plot in Figure 13.7. The criterion variable, `switch`, shows whether people switched from unsafe wells to nearby private or community wells or to new wells of their own construction. Here are the raw counts.
+
+```{r}
+wells %>% 
+  count(switch) %>% 
+  mutate(percent = (100 * n / sum(n)) %>% round(digits = 1))
+```
+
+### 13.7.2 Logistic regression with just one predictor.
+
+Make the histogram of Figure 13.8a.
+
+```{r, fig.width = 3.5, fig.height = 2.25}
+p1 <-
+  wells %>% 
+  ggplot(aes(x = dist)) +
+  geom_histogram(boundary = 0, binwidth = 10) +
+  scale_x_continuous("Distance (in meters) to nearest safe well",
+                     expand = expansion(mult = c(0, 0.05))) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)))
+
+p1
+```
+
+Fit the univariable logistic regression model.
+
+```{r m13.8}
+m13.8 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist,
+      seed = 13,
+      file = "fits/m13.08")
+```
+
+Check the results.
+
+```{r}
+print(m13.8, robust = T, digits = 3)
+```
+
+Make `dist100`.
+
+```{r}
+wells <-
+  wells %>% 
+  mutate(dist100 = dist / 100)
+```
+
+Fit the adjusted model.
+
+```{r m13.9}
+m13.9 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist100,
+      seed = 13,
+      file = "fits/m13.09")
+```
+
+Check the new results.
+
+```{r}
+print(m13.9, robust = T, digits = 1)
+```
+
+### 13.7.3 Graphing the fitted model.
+
+Make the `jitter_binary()` function.
+
+```{r}
+jitter_binary <- function(a, jitt = 0.05) {
+  
+  ifelse(a==0, runif(length(a), 0, jitt), runif(length(a), 1 - jitt, 1))
+  
+}
+```
+
+Here's how the `jitter_binary()` function works.
+
+```{r}
+tibble(y = rep(0:1, each = 3)) %>% 
+  mutate(y_jittered = jitter_binary(y))
+```
+
+Now make the `switch_jitter` column.
+
+```{r}
+wells <-
+  wells %>% 
+  mutate(switch_jitter = jitter_binary(switch))
+
+head(wells)
+```
+
+Now make the rest of Figure 13.8.
+
+```{r, fig.width = 7, fig.height = 2.25}
+newdata <- tibble(dist = seq(from = 0, to = 350, length.out = 100))
+
+p2 <-
+  fitted(m13.8, 
+         newdata = newdata,
+         robust = T) %>% 
+  data.frame() %>%
+  bind_cols(newdata) %>% 
+  
+  ggplot(aes(x = dist)) +
+  geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5),
+              fill = "grey75") +
+  geom_line(aes(y = Estimate)) +
+  geom_point(data = wells,
+             aes(y = switch_jitter),
+             size = 1/10) +
+  scale_x_continuous("Distance (in meters) to nearest safe well",
+                     expand = c(0, 0), limits = c(0, 350)) +
+  scale_y_continuous("Pr (switching)", expand = c(0, 0), limits = 0:1)
+
+# combine
+p1 + p2
+```
+
+Note how the gray band marks off the 95% intervals. In the text, Gelman et al remarked it might be informative to compare the histograms for `dist`, grouped by `switch`. Here's the `tidybayes::stat_histinterval()` approach to that plot.
+
+```{r, fig.width = 3.5, fig.height = 2.75}
+wells %>% 
+  mutate(switch = if_else(switch == 1, "switched", "didn't switch")) %>% 
+  
+  ggplot(aes(x = dist, y = switch)) +
+  stat_histinterval(.width = .5) +
+  scale_x_continuous("Distance (in meters) to nearest safe well",
+                     expand = c(0, 0), limits = c(0, 350)) +
+  ylab(NULL) +
+  coord_cartesian(ylim = c(1.5, 2.5))
+```
+
+The dots and horizontal lines mark off the medians and interquartile ranges, for each.
+
+### 13.7.4 Interpreting the logistic regression coefficients.
+
+To help interpret the model `m13.9` in this section, we'll extract the posterior draws.
+
+```{r}
+post <- posterior_samples(m13.9)
+```
+
+If we use the `invlogit()` on the model intercept, we'll get the probability `switch == `, given `dist100 == 0`.
+
+```{r, fig.width = 4, fig.height = 2.75}
+post %>% 
+  mutate(p = invlogit(b_Intercept)) %>% 
+  ggplot(aes(x = p, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(italic(p)(switching==1~'|'~dist100==0)))
+```
+
+The mean value of `dist100` is about 0.48.
+
+```{r}
+wells %>% 
+  summarise(mean = mean(dist100))
+```
+
+Here is the slope of the curve at the mean of `dist100`.
+
+```{r, fig.width = 4, fig.height = 2.75}
+post %>% 
+  # the value of the linear predictor
+  mutate(vlp = b_Intercept + b_dist100 * 0.48) %>% 
+  mutate(slope = b_dist100 * exp(vlp) / (1 + exp(vlp))^2) %>% 
+  
+  ggplot(aes(x = slope, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression('slope of the curve |'~dist100==0.48))
+```
+
+The divide-by-4 rule gives us a similar value. 
+
+```{r, fig.width = 4, fig.height = 2.75}
+post %>% 
+  mutate(slope = b_dist100 / 4) %>% 
+  
+  ggplot(aes(x = slope, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression('slope of the curve |'~dist100==0.48))
+```
+
+Here are the typical summary statistics for the `dist100` slope.
+
+```{r}
+fixef(m13.9)["dist100", ] %>% round(digits = 2)
+```
+
+We can use `brms::predict()` to comupte the overall probability of switching a well.
+
+```{r, fig.width = 4, fig.height = 2.75}
+set.seed(13)
+pred <- predict(m13.9)[, 1]
+
+tibble(pred = pred) %>% 
+  ggplot(aes(x = pred, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab("overall probability of switching a well")
+```
+
+Here's the corresponding log score.
+
+```{r}
+y <- pull(wells, switch)
+
+(log_score_m13.9 <- sum(y * log(pred) + (1 - y) * log(1 - pred)))
+```
+
+Now we compute the LOO.
+
+```{r}
+m13.9 <- add_criterion(m13.9, "loo")
+
+loo(m13.9)
+```
+
+The `elpd_loo` estimate is just shy of the log score.
+
+### 13.7.5 Adding a second input variable.
+
+Fit the bivariable model.
+
+```{r m13.10}
+m13.10 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist100 + arsenic,
+      seed = 13,
+      file = "fits/m13.10")
+```
+
+Check the results.
+
+```{r}
+print(m13.10, robust = T)
+```
+
+"For a quick interpretation, we divide each of the coefficients by 4" (p. 236).
+
+```{r}
+fixef(m13.10, robust = T)[2:3, c(1, 3:4)] / 4
+```
+
+> Comparing these two coefficients, it would at first seem that distance is a more important factor than arsenic level in determining the probability of switching. Such a statement is misleading, however, because in our data `dist100` shows less variation than `arsenic` (p. 236)
+
+Here we solve that problem by multiplying the coefficients by the sample standard deviations of their respective variables.
+
+```{r}
+# dist100
+fixef(m13.10, robust = T)["dist100", c(1, 3:4)] * sd(wells$dist100)
+# arsenic
+fixef(m13.10, robust = T)["arsenic", c(1, 3:4)] * sd(wells$arsenic)
+```
+
+We might then divide these by 4.
+
+```{r}
+# dist100
+fixef(m13.10, robust = T)["dist100", c(1, 3:4)] * sd(wells$dist100) / 4
+# arsenic
+fixef(m13.10, robust = T)["arsenic", c(1, 3:4)] * sd(wells$arsenic) / 4
+```
+
+
+
+
+
+
+
+```{r, fig.width = 4, fig.height = 2.75}
+set.seed(13)
+pred <- predict(m13.10)[, 1]
+
+tibble(pred = pred) %>% 
+  ggplot(aes(x = pred, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab("overall probability of switching a well, given the bivariable model")
+```
+
+Here's the corresponding log score.
+
+```{r}
+(log_score_m13.10 <- sum(y * log(pred) + (1 - y) * log(1 - pred)))
+```
+
+Compute the LOO for `m13.10`.
+
+```{r}
+m13.10 <- add_criterion(m13.10, "loo")
+
+loo(m13.10)
+```
+
+Now compute the LOO difference between `m13.9` and `m13.10`.
+
+```{r}
+loo_compare(m13.9, m13.10) %>% print(simplify = F)
+```
+
+Based on the LOO, adding `arsenic` substantially improved the model.
+
+### 13.7.6 Comparing the coefficient estimates when adding a predictor.
+
+We might compare the two versions of the $\beta_\text{dist100}$ coefficient with a coefficient plot.
+
+```{r, fig.width = 5, fig.height = 1.25}
+rbind(
+  fixef(m13.9, robust = T)["dist100", ],
+  fixef(m13.10, robust = T)["dist100", ]
+) %>% 
+  data.frame() %>% 
+  mutate(fit = c("m13.9", "m13.10")) %>% 
+  
+  ggplot(aes(x = Estimate, xmin = Q2.5, xmax = Q97.5, y = fit)) +
+  geom_pointrange() +
+  scale_x_continuous(expression(beta[dist100]), limits = c(-2, 0)) +
+  labs(subtitle = "The coefficient changes when you add another predictor",
+       y = NULL) +
+  theme(axis.text.y = element_text(hjust = 0),
+        axis.ticks.y = element_blank())
+```
+
+### 13.7.7 Graphing the fitted model with two predictors.
+
+We'll make Figure 13.10 in three steps. First we make the left panel.
+
+```{r}
+newdata <- 
+  crossing(arsenic = c(0.5, 1.0),
+           dist100 = seq(from = 0, to = 3.5, length.out = 100))
+
+p1 <-
+  fitted(m13.10, 
+         newdata = newdata,
+         robust = T) %>% 
+  data.frame() %>%
+  bind_cols(newdata) %>% 
+  mutate(arsenic = factor(arsenic,
+                          levels = c(1.0, 0.5),
+                          labels = c("1.0", "0.5"))) %>% 
+  
+  ggplot(aes(x = dist100)) +
+  geom_lineribbon(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5, 
+                      fill = arsenic),
+                  alpha = 1/4, size = 0) +
+  geom_line(aes(y = Estimate, color = arsenic),
+            size = 1/2) +
+  geom_point(data = wells,
+             aes(y = switch_jitter),
+             size = 1/10) +
+  scale_fill_viridis_d(option = "A", begin = .25, end = .75) +
+  scale_color_viridis_d(option = "A", begin = .25, end = .75) +
+  scale_x_continuous("Distance (in meters) to nearest safe well",
+                     breaks = 0:3, labels = 0:3 * 100,
+                     expand = c(0, 0), limits = c(0, 3.5)) +
+  scale_y_continuous("Pr (switching)", breaks = 0:5 * 0.2, 
+                     expand = c(0, 0), limits = 0:1) +
+  theme(legend.position = c(.875, .7))
+```
+
+Make Figure 13.10b.
+
+```{r, fig.width = 7, fig.height = 2.5, warning = F, message = F}
+newdata <- 
+  crossing(arsenic = seq(from = 0, to = 10, length.out = 100),
+           dist100 = c(0, 0.5))
+
+p2 <-
+  fitted(m13.10, 
+         newdata = newdata,
+         robust = T) %>% 
+  data.frame() %>%
+  bind_cols(newdata) %>% 
+  mutate(dist100 = factor(dist100,
+                          levels = c(0, 0.5),
+                          labels = c("0", "50"))) %>% 
+  
+  ggplot(aes(x = arsenic)) +
+  geom_lineribbon(aes(y = Estimate, ymin = Q2.5, ymax = Q97.5, 
+                      fill = dist100),
+                  alpha = 1/4, size = 0) +
+  geom_line(aes(y = Estimate, color = dist100),
+            size = 1/2) +
+  geom_point(data = wells,
+             aes(y = switch_jitter),
+             size = 1/10) +
+  scale_fill_viridis_d("dist", option = "E", begin = .25, end = .75, direction = -1) +
+  scale_color_viridis_d("dist", option = "E", begin = .25, end = .75, direction = -1) +
+  scale_x_continuous("Arsenic concentration in well water",
+                     breaks = 0:4 * 2,
+                     expand = c(0, 0), limits = c(0, 9.8)) +
+  scale_y_continuous("Pr (switching)", breaks = 0:5 * 0.2, 
+                     expand = c(0, 0), limits = 0:1) +
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.position = c(.875, .7))
+```
+
+Now combine the two panels and display the whole Figure 13.10.
+
+```{r, fig.width = 7, fig.height = 2.5, warning = F, message = F}
+p1 + p2 + 
+  plot_annotation(subtitle = "Fitted logistic regression of probability of switching from an unsafe well as a function of two variables")
+```
+
+
+
+
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
