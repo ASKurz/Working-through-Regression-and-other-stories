@@ -13,7 +13,7 @@ https://github.com/avehtari/ROS-Examples/
 ```{r, echo = F, cache = F}
 knitr::opts_chunk$set(fig.retina = 2.5)
 knitr::opts_chunk$set(fig.align = "center")
-# options(width = 100)
+options(width = 100)
 ```
 
 # Assumptions, diagnostics, and model evaluation
@@ -22,7 +22,1778 @@ knitr::opts_chunk$set(fig.align = "center")
 
 ## 11.1 Assumptions of regression analysis
 
+In order of what Gelman et al considered to be important, here are the typical assumptions of a regression analysis:
 
+1. validity,
+2. representativeness,
+3. additivity and linearity,
+4. independence of errors,
+5. equal variance of errors, and
+6. normality of errors.
+
+### 11.1.1 Failures of the assumptions.
+
+If possible, change the model so it more faithfully coheres with the data. With modern software, this is becoming easier and easier.
+
+### 11.1.2 Causal inference.
+
+> Further assumptions are necessary if a regression coefficient is to be given a causal interpretation, as we discuss in Part 4 of this book. From a regression context, causal inference can be considered as a form of prediction in which we are interested in what would happen if various predictors were set to particular values. (p. 155)
+
+## 11.2 Plotting the data and fitted model
+
+"Graphics are helpful for visualizing data, understanding models, and revealing patterns in the data not explained by fitted models" (p. 156).
+
+### 11.2.1 Displaying a regression line as a function of one input variable.
+
+Load the `kidiq.csv` data.
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+kidiq <- read_csv("ROS-Examples-master/KidIQ/data/kidiq.csv")
+
+glimpse(kidiq)
+```
+
+Reload model `m10.2` from last chapter.
+
+```{r m10.2_11, warning = F, message = F}
+library(brms)
+
+m10.2 <-
+  brm(data = kidiq,
+      kid_score ~ mom_iq,
+      seed = 10,
+      file = "fits/m10.02")
+```
+
+When we fit this model in Chapter 10, we plotted the results using a combination of `geom_abline()` and `fixef()`. This time we'll use `conditional_effect()`.
+
+```{r, fig.width = 3.25, fig.height = 2.5}
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+ce <- conditional_effects(m10.2, prob = 0, robust = T) 
+  
+plot(ce,
+     points = T,
+     point_args = list(size = 1/10),
+     plot = FALSE)[[1]] +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+```
+
+Had we left out the `prob = 0` argument, the plot would have included the 95% interval ribbon.
+
+### 11.2.2 Displaying two fitted regression lines.
+
+#### 11.2.2.1 Model with no interaction.
+
+Load the multivariable model from last chapter, `m10.3`.
+
+```{r m10.3_11, warning = F, message = F}
+m10.3 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs + mom_iq,
+      seed = 10,
+      file = "fits/m10.03")
+```
+
+When we originally plotted these results for our version of Figure 10.3, we used a single plot. The `conditional_effects()` approach is oriented towards making one plot per predictor. Since we have two predictors, here's how we might depict them with two plots.
+
+```{r, fig.width = 6.25, fig.height = 2.5}
+ce <- conditional_effects(m10.3, prob = 0, robust = T)
+
+# mom_hs
+p1 <-
+  plot(ce,
+       points = T,
+       point_args = list(width = 0.05, height = 0.05, size = 1/10),
+       plot = FALSE)[[1]] +
+  scale_x_continuous("Did the mother graduate high school?", 
+                     breaks = 0:1, labels = c("no", "yes")) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+
+# mom_iq
+p2 <-
+  plot(ce,
+       points = T,
+       point_args = list(size = 1/10),
+       plot = FALSE)[[2]] +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous(NULL, breaks = 0:3 * 40 + 20, labels = NULL)
+
+# combine
+library(patchwork)
+p1 + p2
+```
+
+#### 11.2.2.2 Model with interaction.
+
+Reload the interaction model.
+
+```{r m10.4_11, warning = F, message = F}
+m10.4 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs + mom_iq + mom_hs:mom_iq,
+      seed = 10,
+      file = "fits/m10.04")
+```
+
+Here's a `conditional_effects()` version of the interaction plots of Figure 10.4.
+
+```{r, fig.width = 3.25, fig.height = 2.5}
+ce <-
+  conditional_effects(m10.4, 
+                      prob = 0, 
+                      effects = "mom_iq:mom_hs",
+                      int_conditions = list(mom_hs = 0:1),
+                      robust = T)
+
+plot(ce,
+     points = T,
+     point_args = list(size = 1/10),
+     plot = FALSE)[[1]] +
+  scale_color_manual(values = c("black", "grey60")) +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20) +
+  theme(legend.position = "none")
+```
+
+### 11.2.3 Displaying uncertainty in the fitted regression.
+
+We have already loaded the model from this section. It's `m10.2`. Here's the summary.
+
+```{r}
+print(m10.2, robust = T)
+```
+
+We can continue on with `conditional_effects()` and `plot()` to make our version of Figure 11.1.
+
+```{r, fig.width = 3.25, fig.height = 2.5}
+# for `nsamples`
+set.seed(11)
+
+ce <-
+  conditional_effects(m10.2, 
+                      robust = T,
+                      spaghetti = T,
+                      nsamples = 10)
+
+plot(ce,
+     points = T,
+     line_args = list(colour = "black", size = 1/2),
+     point_args = list(size = 1/10),
+     spaghetti_args = list(colour = "grey67"),
+     plot = FALSE)[[1]] +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+```
+
+### 11.2.4 Displaying using one plot for each input variable.
+
+Again, we've already loaded the model for `kid_score ~ mom_hs + mom_iq`; it's `m10.3`.
+
+```{r}
+print(m10.3, robust = T)
+```
+
+Now use `conditional_effects()` to make Figure 11.2.
+
+```{r, fig.width = 6.25, fig.height = 2.5}
+ce <- 
+  conditional_effects(m10.3, 
+                      prob = 0, robust = T,
+                      spaghetti = T,
+                      nsamples = 10)
+
+# mom_iq
+p1 <-
+  plot(ce,
+       points = T,
+       line_args = list(colour = "black", size = 1/2),
+       point_args = list(size = 1/10),
+       spaghetti_args = list(colour = "grey67"),
+       plot = FALSE)[[2]] +
+  scale_x_continuous("Mother IQ score", breaks = 4:7 * 20) +
+  scale_y_continuous("Child test score", breaks = 0:3 * 40 + 20)
+
+# mom_hs
+p2 <-
+  plot(ce,
+       points = T,
+       line_args = list(colour = "black", size = 1/2),
+       point_args = list(size = 1/10),
+       spaghetti_args = list(colour = "grey67"),
+       plot = FALSE)[[1]] +
+  scale_x_continuous("Did the mother graduate high school?", 
+                     breaks = 0:1, labels = c("no", "yes")) +
+  scale_y_continuous(NULL, breaks = 0:3 * 40 + 20, labels = NULL)  
+
+# combine
+p1 + p2
+```
+
+### 11.2.5 Plotting the outcome vs. a continuous predictor.
+
+Simulate the new `fake` data based on the formula
+
+$$
+\begin{align*}
+y_i & = a + b x_i + \theta z_i + \text{error}_i, \;\;\; \text{where} \\
+\text{error}_i & \sim \operatorname N(0, \sigma).
+\end{align*}
+$$
+
+```{r}
+# how many would you like?
+n <- 100
+
+# set the model parameters
+a <- 1
+b <- 2
+theta <- 5
+sigma <- 2
+
+# simulate
+set.seed(11)
+
+fake <-
+  tibble(x = runif(n, min = 0, max = 1),
+         z = sample(0:1, size = n, replace = T)) %>% 
+  mutate(y = a + b * x + theta * z + rnorm(n, mean = 0, sd = sigma))
+
+# what have we done?
+head(fake)
+```
+
+Fit the bivariable Gaussian model.
+
+```{r m11.1, warning = F, message = F}
+m11.1 <-
+  brm(data = fake,
+      y ~ x + z,
+      seed = 11,
+      file = "fits/m11.01")
+```
+
+Check the summary.
+
+```{r}
+print(m11.1, robust = T)
+```
+
+The model did a pretty good job recovering the data-generating values. Here's how we might make Figure 11.3.
+
+```{r, fig.width = 6.25, fig.height = 2.5}
+# define the abline
+abline <-
+  tibble(z = 0:1) %>% 
+  mutate(intercept = fixef(m11.1, robust = T)[1, 1] + fixef(m11.1, robust = T)[3, 1] * z,
+         slope     = fixef(m11.1, robust = T)[2, 1]) %>% 
+  mutate(z = str_c("z = ", z))
+
+# wrangle
+fake %>% 
+  mutate(z = str_c("z = ", z)) %>% 
+  
+  # plot!
+  ggplot() +
+  geom_point(aes(x = x, y = y, shape = z)) +
+  geom_abline(data = abline, 
+              aes(intercept = intercept, slope = slope)) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  scale_x_continuous("Pre−treatment predictor, x", breaks = 0:5 / 5) +
+  ylab("Outcome, y") +
+  facet_wrap(~z)
+```
+
+"The key here is to recognize that $x$ is continuous and $z$ is discrete, hence it makes sense to make graphs showing $y$ vs. $x$ for different values of $z$" (p. 159).
+
+### 11.2.6 Forming a linear predictor from a multiple regression.
+
+The above plotting strategies won't work well for a large number of predictors, such as in the model
+
+$$
+\begin{align*}
+y_i & = b_0 + b_1 x_{1i} + \cdots + b_K x_{Ki} + \theta z_i + \text{error}_i, && \text{where} \\
+\text{error}_i & \sim \operatorname N(0, \sigma), && \text{and} \\
+K & = 10.
+\end{align*}
+$$
+
+If you follow along with Gelman et al's simulation code, you'll see that `X` is a $100 \times 10$ matrix of predictor values. Compared to **rstanarm**, **brms** is a little more picky about how you feed in a matrix of predictors. Basically, it requires they are saved as a matrix column, which isn't quite what Gelman et al's code does. This adjustment to their workflow solves the issue.
+
+```{r}
+# how many cases would you like?
+n <- 100
+
+# how many grouping variables would you like?
+k <- 10
+
+# simulate an n by k array for X
+# simulate a dummy for z
+set.seed(11)
+
+fake <- 
+  tibble(X = array(runif(n * k, min = 0, max = 1), dim = c(n, k)), 
+         z = sample(0:1, size = n, replace = T))
+
+# set the data-generating parameter values
+a <- 1
+b <- 1:k
+theta <- 5
+sigma <- 2
+
+# simulate the criterion
+fake <-
+  fake %>% 
+  mutate(y = as.vector(a + X %*% b + theta * z + rnorm(n, mean = 0, sd = sigma)))
+
+# check the data structure
+fake %>% 
+  glimpse()
+```
+
+Notice that the `X` column contains a matrix of values. Here's how one might access them.
+
+```{r}
+fake$X %>% glimpse()
+```
+
+Now we're ready to fit the model.
+
+```{r m11.2, warning = F, message = F}
+m11.2 <-
+  brm(data = fake,
+      y ~ X + z,
+      seed = 11,
+      file = "fits/m11.02")
+```
+
+Check the results.
+
+```{r}
+print(m11.2, robust = T)
+```
+
+Gelman et al didn't show the results from their version of the model, but if you do refit the model with `rstanarm::stan_glm()`, you'll see those results match up nicely with those from **brms**.
+
+As to our version of Figure 11.4, we'll first want to recall that the closest **brms** analogue to `rstanarm::predict()` is the `fitted()` function. Since `brms::fitted()` returns point estimates along with 95% intervals, we'll add those to the plot.
+
+``````{r, fig.width = 5.5, fig.height = 3}
+y_hat <- fitted(m11.2)
+
+y_hat %>% 
+  data.frame() %>% 
+  bind_cols(fake %>% select(-X)) %>% 
+  mutate(z = str_c("z = ", z)) %>% 
+  
+  ggplot(aes(x = Estimate, xmin = Q2.5, xmax = Q97.5, y = y)) +
+  geom_abline(color = "grey67") +
+  geom_pointrange(aes(shape = z), 
+                  size = 1/4, stroke = 1/2, fatten = 6) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  coord_equal() +
+  labs(x = expression('Linear predictor, '*hat(y)),
+       y = "Outcome, y") +
+  facet_wrap(~z)
+```
+
+## 11.3 Residual plots
+
+We can evaluate model fit by inspecting the residuals,
+
+$$r_i = y_i = X_i \hat \beta.$$
+
+We can define the residuals from the last model as
+
+$$r_i = y_i - (\hat b_0 + \hat b_1 x_{1i} + \cdots + \hat b_K x_{Ki} + \hat \theta z_i ).$$
+
+When using **brms**, you can pull the residual estimates with the `residuals()` function.
+
+```{r}
+res <- residuals(m11.2)
+
+glimpse(res)
+```
+
+Here's how to make our version of Figure 11.5.
+
+```{r, fig.width = 6.25, fig.height = 2.75}
+tibble(y_hat = y_hat[, 1],
+       r     = res[, 1]) %>% 
+  bind_cols(select(fake, z)) %>% 
+  mutate(z = str_c("z = ", z)) %>%
+  
+  ggplot(aes(x = y_hat, y = r)) +
+  geom_hline(yintercept = 0, color = "grey67") +
+  geom_point(aes(shape = z)) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  labs(x = expression('Linear predictor, '*hat(y)),
+       y = "Residual, r") +
+  facet_wrap(~z)
+```
+
+Understand, however, that since the parameters within a Bayesian model are estimated with uncertainty, as expressed in their marginal posterior distributions, the residuals from a Bayesian model have uncertainty expressed in marginal posterior distributions, too. Though not in the text, here we'll give the uncertainty in the residuals an explicit expression by plotting them with `geom_pointrange()`, this time as a function of the original `y` values.
+
+``````{r, fig.width = 5.5, fig.height = 3}
+res %>% 
+  data.frame() %>% 
+  bind_cols(fake %>% select(-X)) %>% 
+  mutate(z = str_c("z = ", z)) %>% 
+  
+  ggplot(aes(x = y, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_abline(color = "grey67") +
+  geom_pointrange(aes(shape = z), 
+                  size = 1/4, stroke = 1/2, fatten = 6) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  ylab("Residual, r") +
+  facet_wrap(~z)
+```
+
+Now we'll extract the residuals from model `m10.2` to make a version of Figureb 11.6. Our version will contain the 95% intervals.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+# extract the residuals
+res <- residuals(m10.2)
+
+# wrangle
+res %>% 
+  data.frame() %>% 
+  bind_cols(kidiq) %>% 
+  
+  # plot!
+  ggplot(aes(x = mom_iq, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  # note our `sd(res[, 1])` trick to mark off the `yintercept` values
+  geom_hline(yintercept = c(-sd(res[, 1]), 0, sd(res[, 1])),
+             size = 1/4, linetype = c(2, 1, 2), color = "grey50") +
+  geom_pointrange(size = 1/8, stroke = 1/4) +
+  scale_y_continuous("Residuals", breaks = -3:2 * 20) +
+  xlab("Mother IQ score")
+```
+
+### 11.3.1 Using fake-data simulation to understand residual plots.
+
+"Simulation of fake data can be used to validate statistical algorithms and to check the properties of estimation procedures" (p. 161).
+
+### 11.3.2 A confusing choice: plot residuals vs. predicted values, or residuals vs. observed values?
+
+Load the `gradesW4315.dat` data.
+
+```{r, message = F, warning = F}
+introclass <- 
+  read_table2("ROS-Examples-master/Introclass/data/gradesW4315.dat") %>% 
+  select(hw1:final)
+
+glimpse(introclass)
+```
+
+Fit the simple model of `midterm` grades predicting grades on the `final`.
+
+```{r m11.3, warning = F, message = F}
+m11.3 <-
+  brm(data = introclass,
+      final ~ midterm,
+      seed = 11,
+      file = "fits/m11.03")
+```
+
+Check the results.
+
+```{r}
+print(m11.3, robust = T)
+```
+
+Here we'll extract the point predictions and the residuals.
+
+```{r}
+y_hat <- fitted(m11.3)
+res <- residuals(m11.3)
+```
+
+Here's how to make our version of Figure 11.7.
+
+```{r, fig.width = 6.5, fig.height = 2.75}
+# left
+p1 <-
+  tibble(y_hat = y_hat[, 1],
+         r     = res[, 1]) %>% 
+  
+  ggplot(aes(x = y_hat, y = r)) +
+  geom_hline(yintercept = 0, color = "grey67") +
+  geom_point() +
+  labs(subtitle = "Residuals vs. predicted values",
+       x = "predicted value",
+       y = "residual")
+
+# right
+p2 <-
+  tibble(y = pull(introclass, final),
+         r = res[, 1]) %>% 
+  
+  ggplot(aes(x = y, y = r)) +
+  geom_hline(yintercept = 0, color = "grey67") +
+  geom_point() +
+  scale_y_continuous(NULL, labels = NULL) +
+  labs(subtitle = "Residuals vs. observed values",
+       x = "observed value")
+
+# combine
+p1 + p2
+```
+
+> Figure 11.7a looks reasonable: the residuals are centered around zero for all fitted values. But Figure 11.7b looks troubling.
+>
+> It turns out that the first plot is what we should be looking at, and the second plot is misleading. This can be understood using probability theory (from the regression model, the errors $\epsilon_i$ should be independent of the predictors $x_i$, not the data $y_i$. (p. 162)
+
+### 11.3.3 Understanding the choice using fake-data simulation.
+
+"For this example, we set the coefficients and residual standard deviation to reasonable values given the model estimates, and then we simulate fake final exam data using the real midterm as a predictor" (p. 162).
+
+```{r}
+# define the data-generating parameters,
+# which are similar to the posterior means from `m11.3`
+a <- 64.5
+b <- 0.7
+sigma <- 14.8
+
+# simulate
+set.seed(11)
+introclass <-
+  introclass %>% 
+  mutate(final_fake = a + b * midterm + rnorm(n(), mean = 0, sd = sigma))
+
+head(introclass)
+```
+
+Fit the new model, with `final_fake` as the criterion.
+
+```{r m11.4, warning = F, message = F}
+m11.4 <-
+  brm(data = introclass,
+      final_fake ~ midterm,
+      seed = 11,
+      file = "fits/m11.04")
+```
+
+Check the results.
+
+```{r}
+print(m11.4, robust = T)
+```
+
+Now we'll make Figure 11.8.
+
+```{r, fig.width = 6.5, fig.height = 2.75}
+# extract the new point predictions and the residuals
+y_hat <- fitted(m11.4)
+res <- residuals(m11.4)
+
+# left
+p1 <-
+  tibble(y_hat = y_hat[, 1],
+         r     = res[, 1]) %>% 
+  
+  ggplot(aes(x = y_hat, y = r)) +
+  geom_hline(yintercept = 0, color = "grey67") +
+  geom_point() +
+  labs(subtitle = "Fake data: resids vs. predicted",
+       x = "predicted value",
+       y = "residual")
+
+# right
+p2 <-
+  tibble(y = pull(introclass, final_fake),
+         r = res[, 1]) %>% 
+  
+  ggplot(aes(x = y, y = r)) +
+  geom_hline(yintercept = 0, color = "grey67") +
+  geom_point() +
+  scale_y_continuous(NULL, labels = NULL) +
+  labs(subtitle = "Fake data: resids vs. observed",
+       x = "observed value")
+
+# combine
+p1 + p2
+```
+
+> Figure 11.8 shows the plots of `resid_fake` versus `predicted_fake` and `final_fake`. These are the sorts of residual plots we would see if the *model* were *correct.* This simulation shows why we prefer to plot residuals versus predicted rather than observed values. (p. 163, *emphasis* in the original)
+
+## 11.4 Comparing data to replications from a fitted model
+
+"Here we introduce *posterior predictive checking*: simulating replicated datasets under the fitted model and then comparing these to the observed data" (p. 163, *emphasis* in the original).
+
+### 11.4.1 Example: simulation-based checking of a fitted normal distribution.
+
+Load the `newcomb.txt` data.
+
+```{r, message = F}
+newcomb <- read_csv("ROS-Examples-master/Newcomb/data/newcomb.txt")
+
+glimpse(newcomb)
+```
+
+Let's recreate the histogram in Figure 11.9.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+newcomb %>% 
+  ggplot(aes(x = y)) +
+  geom_histogram(boundary = 0, binwidth = 2) +
+  scale_x_continuous(NULL, breaks = -2:2 * 20) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05)))
+```
+
+Fit an intercept-only regression model to the data.
+
+```{r m11.5, warning = F, message = F}
+m11.5 <-
+  brm(data = newcomb,
+      y ~ 1,
+      seed = 11,
+      file = "fits/m11.05")
+```
+
+Check the summary.
+
+```{r}
+print(m11.5, robust = T)
+```
+
+Instead of a `for` loop, here we'll use a `purrr::map2()` work flow to make our Figure 11.10.
+
+```{r, fig.width = 6.5, fig.height = 4.5}
+# how many simulations would you like?
+n <- 20
+set.seed(11)
+
+posterior_samples(m11.5) %>% 
+  slice_sample(n = n) %>% 
+  mutate(iter = factor(str_c("iteration #", 1:n),
+                       levels = str_c("iteration #", 1:n)),
+         y = map2(b_Intercept, sigma, ~rnorm(n = 66, mean = b_Intercept, sd = sigma))) %>% 
+  unnest(y) %>% 
+  
+  ggplot(aes(x = y)) +
+  geom_histogram(boundary = 0, binwidth = 2) +
+  scale_x_continuous(NULL, breaks = -2:3 * 20) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  facet_wrap(~iter)
+```
+
+Here's a `posterior_predict()` version of the same kind of check.
+
+```{r, fig.width = 6.5, fig.height = 4.5}
+# how many simulations would you like?
+# anticipating Figure 11.12, we'll choose 1,000
+n <- 1000
+
+nd <- tibble(iter = 1:n)
+
+set.seed(11)
+
+y_rep <-
+  posterior_predict(m11.5,
+                    newdata = nd,
+                    nsamples = 66) %>% 
+  data.frame() %>% 
+  set_names(1:n) %>% 
+  pivot_longer(everything(), values_to = "y") %>% 
+  mutate(iter = factor(str_c("iteration #", name),
+                       levels = str_c("iteration #", 1:n)))
+
+y_rep %>% 
+  filter(as.double(name) < 21) %>% 
+  
+  ggplot(aes(x = y)) +
+  geom_histogram(boundary = 0, binwidth = 2) +
+  scale_x_continuous(NULL, breaks = -2:3 * 20) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  facet_wrap(~iter)
+```
+
+#### 11.4.1.1 Visual comparison of actual and replicated datasets.
+
+Oops, we jumped the gun and already made Figure 11.10. To fill this section up, we can do something very similar with the handy `brms::pp_check()` function. Here we'll plot 19 histograms of synthetic data nest to a histogram of the original data.
+
+```{r, fig.width = 7, fig.height = 4.5}
+set.seed(11)
+
+pp_check(m11.5, type = "hist", nsamples = 19, binwidth = 2)
+```
+
+Since we're on the topic of `pp_check()`, here's how to use it to make a very close replica of Figure 11.11.
+
+```{r, fig.width = 5, fig.height = 2.5}
+set.seed(11)
+
+pp_check(m11.5, nsamples = 100)
+```
+
+#### 11.4.1.2 Checking model fit using a numerical data summary.
+
+"Data displays can suggest more focused test statistics with which to check model fit" (p. 165). We'll use the authors' `test()` function to compute the minimum value for each of the synthetic data sets in `y_rep`. First, make the `test()` function.
+
+```{r}
+test <- function(y) { 
+  min(y)
+}
+```
+
+Now use `test()` to make Figure 11.12.
+
+```{r, fig.width = 3.5, fig.height = 2.5, message = F}
+y_rep %>% 
+  group_by(iter) %>% 
+  summarise(min = test(y)) %>% 
+  
+  ggplot(aes(x = min)) +
+  geom_histogram(boundary = 0, binwidth = 2) +
+  geom_vline(xintercept = min(newcomb$y), color = "red4", size = 2) +
+  scale_x_continuous(NULL, breaks = -4:1 * 10) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05)))
+```
+
+The minimum value from the original `newcomb` data is marked by the red vertical line. We can make a very similar plot with a workflow based around the **bayesplot** package.
+
+```{r, message = F}
+library(bayesplot)
+```
+
+First, we'll need to redo our `y_rep`.
+
+```{r}
+y_rep <-
+  posterior_predict(m11.5,
+                    newdata = nd,
+                    nsamples = 66)
+
+glimpse(y_rep)
+```
+
+We did that because the `bayesplot::ppc_stat()` function expects an $S \times N$ matrix of simulation values where $S$ is the number of simulations and $N$ is the original sample size. Since our `y_rep` is an $N \times S$ matrix, we'll just have to transpose it with `t()`. For kicks and giggles, we'll use **patchwork** syntax to tack on an additional posterior predictive test for the median.
+
+```{r, fig.width = 8, fig.height = 2.5, message = F}
+ppc_stat(y = newcomb$y, yrep = t(y_rep), stat = "min", binwidth = 2) + 
+  ppc_stat(y = newcomb$y, yrep = t(y_rep), stat = "median", binwidth = 0.5) +
+  plot_annotation(subtitle = "We can check model fit using numerical data summaries, such as with the min() and median() functions.")
+```
+
+## 11.5 Example: predictive simulation to check the fit of a time-series model
+
+"Predictive simulation is more complicated in time-series models, which are typically set up so that the distribution for each point depends on the earlier data" (p. 166).
+
+### 11.5.1 Fitting a first-order autoregression to the unemployment series.
+
+Load the `unemp.txt` data.
+
+```{r, message = F}
+unemp <- read_table2("ROS-Examples-master/Unemployment/data/unemp.txt")
+
+glimpse(unemp)
+```
+
+Plot the time-series data as in Figure 11.13.
+
+```{r, fig.width = 5.5, fig.height = 2.75}
+unemp %>% 
+  ggplot(aes(x = year, y = y)) +
+  geom_line() +
+  scale_x_continuous("Year", breaks = 0:3 * 20 + 1950) +
+  scale_y_continuous("Unemployment rate", 
+                     breaks = 0:2 * 5, labels = scales::percent_format(scale = 1, accuracy = 1),
+                     limits = c(0, 10), expand = expansion(mult = c(0, 0.05)))
+```
+
+We can make a lagged version of the `y` criterion with aid from the `lag()` function.
+
+```{r}
+unemp <-
+  unemp %>% 
+  mutate(my_lag = lag(y))
+
+head(unemp)
+```
+
+Now fit a first-order autoregressive model.
+
+```{r m11.6, warning = F, message = F}
+m11.6 <-
+  brm(data = unemp,
+      y ~ y_lag,
+      seed = 11,
+      file = "fits/m11.06")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m11.6, robust = T)
+```
+
+### 11.5.2 Simulating replicated datasets.
+
+I'm not nimble enough with the kind of work flow in this section to translate the simulation code into **tidyverse** style. So we'll follow along with the text for the first couple of blocks. First, we set a couple constants and pull the posterior draws.
+
+```{r}
+n <- nrow(unemp)
+sims <- as.matrix(m11.6) 
+n_sims <- nrow(sims)
+
+str(sims)
+n_sims
+```
+
+Now simulate.
+
+```{r}
+set.seed(11)
+
+y_rep <- array(NA, c(n_sims, n)) 
+for (s in 1:n_sims) {
+  y_rep[s, 1] <- unemp$y[1] 
+  for (t in 2:n) {
+    y_rep[s, t] <- sims[s, "b_Intercept"] + 
+      sims[s, "b_y_lag"] * y_rep[s, t - 1] + 
+      rnorm(1, 0, sims[s, "sigma"])
+  } 
+}
+```
+
+What have we done?
+
+```{r}
+str(y_rep)
+```
+
+Now make Figure 11.14.
+
+```{r, fig.width = 7, fig.height = 4.25}
+set.seed(11)
+
+y_rep %>% 
+  data.frame() %>% 
+  set_names(pull(unemp, year)) %>% 
+  mutate(iter = factor(str_c("Simulation ", 1:n()),
+                       labels = str_c("Simulation ", 1:n()))) %>% 
+  slice_sample(n = 15) %>% 
+  pivot_longer(-iter, values_to = "y") %>% 
+  mutate(year = name %>% as.double()) %>% 
+  
+  ggplot(aes(x = year, y = y)) +
+  geom_line() +
+  scale_x_continuous("Year", breaks = 0:3 * 20 + 1950) +
+  scale_y_continuous("Unemployment rate", 
+                     breaks = 0:2 * 5, labels = scales::percent_format(scale = 1, accuracy = 1)) +
+  coord_cartesian(ylim = c(0, max(unemp$y) * 1.05)) +
+  facet_wrap(~iter, nrow = 3)
+```
+
+"We could not simply create these simulations using `posterior_predict` because with this time-series model we need to simulate each year conditional on the last" (p. 167).
+
+### 11.5.3 Visual and numerical comparisons of replicated to actual data.
+
+Make the new `test()` function to assess the jaggedness of the time serries in terms of the frequency of switches.
+
+```{r}
+test <- function(y) {
+  
+  n <- length(y)
+  y_lag <- c(NA, y[1:(n - 1)])
+  y_lag_2 <- c(NA, NA, y[1:(n - 2)])
+  sum(sign(y - y_lag) != sign(y_lag - y_lag_2), na.rm = TRUE) 
+  
+}
+```
+
+Now we might use our new `test()` function within the context of a `bayesplot::ppc_stat()` plot.
+
+```{r, fig.width = 4, fig.height = 2.5, message = F}
+ppc_stat(y = unemp$y, yrep = y_rep, stat = "test", binwidth = 1)
+```
+
+In the text, Gelmen et al wrote 99% of the simulated data sets had `test()` values higher than the one for the original data. Our plot seems to cohere with that. Here we'll get the precise percentage.
+
+```{r, message = F}
+y_rep %>% 
+  data.frame() %>% 
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(-iter) %>% 
+  group_by(iter) %>% 
+  summarise(greater_than_y = test(value) > test(unemp$y)) %>% 
+  summarize(percent_greater_than_y = 100 * mean(greater_than_y))
+```
+
+What are the median and 80% ranges for the simulated data sets?
+
+```{r, message = F}
+library(tidybayes)
+
+y_rep %>% 
+  data.frame() %>% 
+  mutate(iter = 1:n()) %>% 
+  pivot_longer(-iter) %>% 
+  group_by(iter) %>% 
+  summarise(test = test(value)) %>% 
+  median_qi(test, .width = .8)
+```
+
+The median value was 36, with an 80% range of 31 to 42, "implying that this aspect of the data was not captured well by the model" (p. 168).
+
+## 11.6 Residual standard deviation $\sigma$ and explained variance $R^2$
+
+> The residual standard deviation, $\sigma$, summarizes the scale of the residuals $r_i = y_i − X_i \hat \beta$. For example, in the children’s test scores example, $\hat \sigma = 18$, which tells us that the linear model can predict scores to about an accuracy of 18 points. Said another way, we can think of this standard deviation as a measure of the average distance each observation falls from its prediction from the model. (p. 168)
+
+We might walk this out a bit. The "children’s test scores example" in the block quote referrs to `m10.3`. Here's the summary, again.
+
+```{r}
+print(m10.3, robust = T)
+```
+
+Indeed, $\hat \sigma \approx 18$. We can get another sense of what this mean with `predict()`.
+
+```{r}
+predict(m10.3) %>% 
+  head()
+```
+
+`brms::predict()` returns a posterior prediction for a new case of the same predictor values as the cases in the original data. Notice how the values in the `Est.Error` column are all just about 18, which is what the authors meant by "the linear model can predict scores to about an accuracy of 18 points."
+
+The classic formula for $R^2$ is
+
+$$R^2 = 1 - (\hat \sigma^2 / s_y^2),$$
+
+where $s_y^2$ is the variance in the sample data. Though our Bayesian `m10.3` isn't a classical model, we might practice and sub in the posterior median for $\hat \sigma^2$ to compute the $R^2$ by hand.
+
+```{r}
+hat_sigma2 <-
+  posterior_samples(m10.3) %>% 
+  summarise(hat_sigma2 = median(sigma^2)) %>% 
+  pull()
+
+y_s2 <- var(kidiq$kid_score)
+
+1 - (hat_sigma2 / y_s2)
+```
+
+To convert that proportion to a percent, you just multiply by 100, which returns about 21%. 
+
+### 11.6.1 Difficulties in interpreting residual standard deviation and explained variance.
+
+At the moment, it's not clear whether the authors provide the code necessary to make Figure 11.15 and Figure 11.16. *Sigh*
+
+### 11.6.2 Bayesian $R^2$.
+
+Make the simulated `xy` data based on the code in the `rdquared.Rmd` file.
+
+```{r }
+xy <- 
+  tibble(x = 1:5 - 3,
+         y = c(1.7, 2.6, 2.5, 4.4, 3.8) - 3)
+
+xy
+```
+
+First fit the model with OLS.
+
+```{r}
+m11.7_ols <- lm(data = xy, y ~ x)
+```
+
+Check the summary.
+
+```{r}
+summary(m11.7_ols)
+```
+
+IF you look to the bottom of the output, the classical $R^2 = .766$. Now consider a Bayesian version of the model with strong priors,
+
+$$
+\begin{align*}
+y_i & \sim \operatorname N(\mu_i, \sigma) \\
+\mu_i & = \beta_0 + \beta_1 x_i \\
+\beta_0 & \sim \operatorname N(0, 0.2) \\
+\beta_1 & \sim \operatorname N(1, 0.2),
+\end{align*}
+$$
+
+where the prior for $\sigma$ is just the software default. Here that is for **brms**.
+
+```{r}
+get_prior(data = xy,
+          family = gaussian,
+          y ~ x)
+```
+
+Fit the model.
+
+```{r m11.7, warning = F, message = F}
+m11.7 <-
+  brm(data = xy,
+      y ~ x,
+      prior = c(prior(normal(0, 0.2), class = Intercept),
+                prior(normal(1, 0.2), class = b)),
+      seed = 11,
+      file = "fits/m11.07")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m11.7, robust = T)
+```
+
+Now we'll visualize the OLS and Bayesian fits with Figure 11.16.
+
+```{r, fig.width = 8, fig.height = 3.5}
+# left
+p1 <-
+  xy %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  # ols
+  geom_abline(intercept = coef(m11.7_ols)[1],
+              slope = coef(m11.7_ols)[2],
+              color = "blue3", size = 1/4) +
+  # bayes prior
+  geom_abline(intercept = 0, slope = 1,
+              linetype = 2, color = "red3", size = 1/4) +
+  # bayes posterior
+  geom_abline(intercept = fixef(m11.7, robust = T)[1, 1],
+              slope = fixef(m11.7, robust = T)[2, 1],
+              color = "purple3", size = 1/4) +
+  annotate(geom = "text",
+           x = c(-1.75, -1.5, 1.5),
+           y = c(-0.75, -2, 1.25),
+           label = c("OLS", "Prior", "Posterior"),
+           color = c("blue3", "red3", "purple3")) +
+  labs(subtitle = "Least squares and Bayes fits") +
+  ylim(-2, 2)
+
+# right
+set.seed(11)
+
+p2 <-
+  posterior_samples(m11.7) %>% 
+  mutate(iter = 1:n()) %>% 
+  slice_sample(n = 20) %>% 
+  
+  ggplot() + 
+  # 20 random posterior draws
+  geom_abline(aes(intercept = b_Intercept,
+                  slope = b_x, 
+                  group = iter),
+              size = 1/4, alpha = 1/2) +
+  # posterior mean
+  geom_abline(intercept = fixef(m11.7)[1, 1],
+              slope = fixef(m11.7)[2, 1],
+              size = 1) +
+  geom_point(data = xy,
+             aes(x = x, y = y)) +
+  labs(subtitle = "Bayes posterior simulations") +
+  scale_y_continuous(NULL, labels = NULL, limits = c(-2, 2))
+
+p1 + p2
+```
+
+The authors then wrote: "The standard deviation of the fitted values from the Bayes model is 1.3, while the standard deviation of the data is only 1.08, so the square of this ratio--$R^2$ as defined in (11.2)--is greater than 1" (p. 170). Here is the standard deviation for the fitted values for `m11.7`.
+
+```{r}
+fitted(m11.7) %>% 
+  data.frame() %>% 
+  summarise(sd_fitted_values = sd(Estimate))
+```
+
+The standard deviation for the actual data.
+
+```{r}
+xy %>% 
+  summarise(sd_data = sd(y))
+```
+
+To overcome this oddity, Gelman et al recommend we define the Bayesian $R^2$ by a different formula,
+
+$$\text{alternative}\ R^2 = \frac{\text{explained variance}}{\text{explained variance} + \text{residual variance}} = \frac{\operatorname{var}_\text{fit}}{\operatorname{var}_\text{fit} + \operatorname{var}_\text{res}}.$$
+
+For models fit with **brms**, you can compute the Bayesian $R^2$ based on that formula with the `brms::bayes_R2()` function. By default, `brms::bayes_R2()` returns a summary.
+
+```{r}
+bayes_R2(m11.7, robust = T)
+```
+
+If you set `summary = FALSE`, you'll get a vector of posterior draws for plotting. Here we'll make an augmented version of Figure 11.18, with the $R^2$ posteriors for both `m10.3` and `m11.7`.
+
+```{r, fig.width = 8, fig.height = 2.5}
+tibble(m10.3 = bayes_R2(m10.3, summary = F)[, 1],
+       m11.7 = bayes_R2(m11.7, summary = F)[, 1]) %>% 
+  pivot_longer(everything(), names_to = "fit") %>% 
+  
+  ggplot(aes(x = value)) +
+  geom_histogram(binwidth = 0.01) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  xlab(expression(Bayesian~italic(R)^2)) +
+  facet_wrap(~fit, scales = "free_y", labeller = label_both)
+```
+
+## 11.7 External validation: checking fitted model on new data
+
+> The most fundamental way to test a model is to use it to make predictions and then compare to actual data. Figure 11.19 illustrates with the children's test score model, which was fit to data collected from children who were born before 1987. Having fit the model using `stan_glm`, we then use `posterior_predict` to obtain simulations representing the predictive distribution for new cases.
+>
+> We apply the model to predict the outcomes for children born in 1987 or later. (p. 171)
+
+Though I believe I understand how to do this, in principle, it is not clear to my how Gelman et al did this with the actual data they provided. First, the model they're referring to is what we called `m10.3`. Again, here's its summary.
+
+```{r}
+print(m10.3)
+```
+
+We fit this model using the `kidiq` data.
+
+```{r}
+glimpse(kidiq)
+```
+
+None of the variables in those data give us a clear way to predict outcomes for children born at a later date or in a different age range. We can still use `posterior_predict()` to simulate $y^\text{new}$ values for children who have the same `mom_hs` and `mom_iq` values as those in the data. With the information I have, here's about the best I can do for Figure 11.19.
+
+```{r, fig.width = 6.5, fig.height = 2.5}
+# left
+set.seed(11)
+
+p1 <-
+  tibble(y_new = posterior_predict(m10.3)[1, ]) %>% 
+  bind_cols(kidiq) %>% 
+  ggplot(aes(x = y_new, y = kid_score)) +
+  geom_abline(color = "grey75", size = 1/3) +
+  geom_point(size = 1/2) +
+  scale_x_continuous(expression(italic(y)^new~(predicted~score)), breaks = 0:3 * 40 + 20) +
+  scale_y_continuous(expression(italic(y)~(actual~score)), breaks = 0:3 * 40 + 20)
+
+# right
+set.seed(11)
+
+p2 <-
+  tibble(res   = residuals(m10.3)[, 1],
+         y_new = posterior_predict(m10.3)[1, ]) %>% 
+  
+  ggplot(aes(x = y_new, y = res)) +
+  geom_hline(yintercept = c(mean(residuals(m10.3)[, 1]) - sd(residuals(m10.3)[, 1]),
+                            mean(residuals(m10.3)[, 1]), 
+                            mean(residuals(m10.3)[, 1]) + sd(residuals(m10.3)[, 1])),
+             color = "grey75", size = 1/3, linetype = c(2, 1, 2)) +
+  geom_point(size = 1/2) +
+  scale_x_continuous(expression(italic(y)^new~(predicted~score)), breaks = 0:3 * 40 + 20) +
+  scale_y_continuous(expression(italic(r)~(predicted~error)), breaks = 0:2 * 40 - 60) 
+
+# combine
+p1 + p2 + plot_layout(widths = 1:2)
+```
+
+## 11.8 Cross validation
+
+> In cross validation, part of the data is used to fit the model and the rest of the data--the *hold-out set*--is used as a proxy for future data. When there is no natural prediction task for future data, we can think of cross validation as a way to assess generalization from one part of the data to another part.
+>
+> Different data partitions can be used, depending on the modeling task. We can hold out individual observations (*leave-one-out (LOO)* cross validation) or groups of observations (*leave-one-group-out*), or use past data to predict future observations (*leave-future-out*). (p. 172, *emphasis* in the original)
+
+### 11.8.1 Leave-one-out cross validation.
+
+Simulate the new `fake` data.
+
+```{r}
+# how many would you like?
+n <- 20
+
+# population parameter values
+a <- 0.2
+b <- 0.3
+sigma <- 1
+
+# simulate
+set.seed(2141)
+
+fake <-
+  tibble(x = 1:n ) %>% 
+  mutate(y = a + b * x + sigma * rnorm(n(), mean = 0, sd = 1))
+
+# take a look
+head(fake)
+```
+
+Before they showed the model code, Gelman et al foreshadowed the 18^th^ case will be a little off relative to the others. Let's make an exploratory graph to take a look at that case. We'll emphasize it with a red circle.
+
+```{r, fig.width = 4, fig.height = 2.5}
+fake %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  geom_point(data = . %>% filter(x == 18),
+             shape = 1, size = 4, color = "red3") +
+  ylim(0, NA)
+```
+
+Fit the model with and without the 18^th^ case.
+
+```{r m11.8_all, warning = F, message = F}
+m11.8_all <-
+  brm(data = fake,
+      y ~ x,
+      seed = 11,
+      file = "fits/m11.08_all")
+
+m11.8_minus_18 <-
+  brm(data = filter(fake, x != 18),
+      y ~ x,
+      seed = 11,
+      file = "fits/m11.08_minus_18")
+```
+
+Check the parameter summaries for both models.
+
+```{r}
+print(m11.8_all, robust = T)
+print(m11.8_minus_18, robust = T)
+```
+
+Figure 11.20a contains an interesting feature, which is the density of the posterior predictive distributions, given `x == 18`, for each of the fits. Those densities were plotted as if on their sides, with respect to the $x$-axis. Since this is an unusual way to plot density values, we'll get a better appreciation for what they are with a few preparatory steps. First, we'll compute and plot the predictive distributions, given `x == 18`, for each of the fits.
+
+```{r, fig.width = 6, fig.height = 2.75}
+# compute and wrangle
+nd <- tibble(x = 18)
+
+set.seed(11)
+
+pp <-
+  tibble(all      = posterior_predict(m11.8_all, newdata = nd),
+         minus_18 = posterior_predict(m11.8_minus_18, newdata = nd))
+
+#  plot
+pp %>% 
+  pivot_longer(everything(),
+               names_to = "fit") %>% 
+  
+  ggplot(aes(x = value, fill = fit)) +
+  geom_density(size = 0) +
+  scale_fill_manual(values = c("black", "grey50")) +
+  xlab("posterior predictive distribution when x = 18") +
+  theme(legend.position = "none") +
+  facet_wrap(~fit, labeller = label_both)
+```
+
+Gelman et al's Figure 11.20a presumes one can reasonably summarize those densities as if there were normally distributed. To assess the credibility of those assumptions, we'll superimpose normal density curves based on the mean and standard deviation values of the posteirors.
+
+```{r, fig.width = 6, fig.height = 2.75}
+pp %>% 
+  pivot_longer(everything(),
+               names_to = "fit") %>% 
+  group_by(fit) %>% 
+  # mean and sd values, by fit
+  mutate(mean = mean(value),
+         sd = sd(value)) %>% 
+  # use the mean and sd values to compute the density values
+  mutate(d = dnorm(value, mean = mean, sd = sd)) %>% 
+  arrange(value) %>% 
+  
+  ggplot(aes(x = value)) +
+  geom_density(aes(fill = fit), 
+               alpha = 2/3, size = 0) +
+  geom_line(aes(y = d, color = fit)) + 
+  scale_fill_manual(values = c("black", "grey50")) + 
+  scale_color_manual(values = c("black", "grey50")) +
+  xlab("posterior predictive distribution when x = 18") +
+  theme(legend.position = "none") +
+  facet_wrap(~fit, labeller = label_both)
+```
+
+Those idealized normal curves aren't perfect representations of the underlying densities, but they're pretty close. Here we'll compute those densities for many values between `y == 0` and `y == 9` and plot to make Figure 11.20a.
+
+```{r, message = F}
+# to simplify the `geom_abline()` code
+ps_all      <- posterior_summary(m11.8_all, robust = T)
+ps_minus_18 <- posterior_summary(m11.8_minus_18, robust = T)
+
+# compute the sideways densities
+p1 <-
+  pp %>% 
+  pivot_longer(everything(),
+               names_to = "fit") %>% 
+  group_by(fit) %>% 
+  summarise(mean = mean(value),
+            sd = sd(value)) %>% 
+  expand(nesting(fit, mean, sd),
+         y = seq(from = 0, to = 9, length.out = 100)) %>% 
+  mutate(d = dnorm(y, mean = mean, sd = sd)) %>% 
+  select(-mean, -sd) %>% 
+  pivot_wider(names_from = fit, values_from = d) %>% 
+  
+  # plot!
+  ggplot(aes(y = y)) +
+  geom_point(data = fake,
+             aes(x = x)) +
+  geom_point(data = fake %>% filter(x == 18),
+             aes(x = x),
+             shape = 1, size = 4, color = "red3") +
+  geom_abline(intercept = ps_all[1, 1],
+              slope = ps_all[2, 1]) +
+  geom_abline(intercept = ps_minus_18[1, 1],
+              slope = ps_minus_18[2, 1],
+              color = "grey50", linetype = 2) +
+  geom_path(aes(x = all * 6 + 18)) +
+  geom_path(aes(x = minus_18 * 6 + 18), 
+            color = "grey50", linetype = 2) +
+  xlim(0.5, 20.5)
+```
+
+The panel in Figure 11.20b requires we compute two kinds of residuals. For simplicity, we'll be focusing on the posterior means for both kinds of residuals. The first kind will be the conventional residuals, which we'll compute by hand. The second kind will be based on the expected values form the `brms::loo_predict()` function. Though we won't do so here, you can compute the corresponding intervals with `brms::loo_predictive_interval()`.
+
+```{r, warning = F, message = F}
+fake <-  
+  fake %>% 
+  mutate(fitted   = fitted(m11.8_all)[, 1],
+         loo_pred = loo_predict(m11.8_all)) %>% 
+  mutate(residual       = y - fitted,
+         `LOO residual` = y - loo_pred)
+
+p2 <-
+  fake %>% 
+  pivot_longer(contains("residual"), values_to = "residual") %>% 
+  
+  ggplot(aes(x = x, y = residual)) +
+  geom_hline(yintercept = 0, linetype = 3, size = 1/4) +
+  geom_point(aes(shape = name)) +
+  geom_line(aes(group = x),
+            size = 1/4) +
+  scale_shape_manual(NULL, values = c(1, 19)) +
+  xlim(0.5, 20.5) +
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.key.size = unit(0.35, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        legend.position = c(.13, .92),
+        legend.text = element_text(size = 6))
+```
+
+Combine the two subplots to make the full Figure 11.20.
+
+```{r, fig.width = 8, fig.height = 3.5}
+p1 + p2
+```
+
+In statistical notation, we can describe the posterior predictive distributions highlighted in the left panel as
+
+$$p(y^\text{new} | x^\text{new}) \approx \frac{1}{S} \sum_{s = 1}^S p(y^\text{new} | x^\text{new}, \beta^s, \sigma^s),$$
+
+where the various levels of $s$ index a given posterior *simulation* draw, and we implicitly presume the posterior predictive distribution is normal by considering the parameters in terms of $\beta^s$, which define the mean, and $\sigma^s$, which define the standard deviation.
+
+As for the right panel, the `loo_predict()` function yields the expected values from the LOO model excluding the held-out data point. Thus the LOO residuals are those values when subtracted from the data-generating values. "In this example, the LOO residuals all have larger magnitudes, reflecting that it is more difficult to predict something that was not used in model fitting" (p. 174).
+
+Here are the standard deviations for the two kinds of residuals.
+
+```{r, message = F}
+fake %>% 
+  pivot_longer(contains("residual"), names_to = "kind", values_to = "residual") %>%
+  group_by(kind) %>% 
+  summarise(sd = sd(residual))
+```
+
+If we just focus on point estimates, here's the Bayesian $R^2$ for the full model and for the LOO approximation.
+
+```{r}
+var_fitted       <- var(fake$fitted)
+var_residual     <- var(fake$residual)
+var_loo_residual <- var(fake$`LOO residual`)
+
+# full model
+var_fitted / (var_fitted + var_residual)
+# LOO
+var_fitted / (var_fitted + var_loo_residual)
+```
+
+### 11.8.2 Fast leave-one-out cross validation.
+
+> LOO cross validation could be computed by fitting the model $n$ times, once with each data point excluded. But this can be time consuming for large $n$. The `loo` function uses a shortcut that makes use of the mathematics of Bayesian inference, where the posterior distribution can be written as the prior distribution multiplied by the likelihood. (p. 174)
+
+### 11.8.3 Summarizing prediction error using the log score and deviance.
+
+We can use the `brms::log_lik()` function to return $\log p(y_i | \theta^s)$.
+
+```{r}
+ll_all <- log_lik(m11.8_all)
+
+str(ll_all)
+```
+
+This returned an $S \times N$ matrix, where the posterior draws are depicted in the rows and the cases in the data are depicted in the columns. Next, we'll want to compute the average of each column, $\log \left( \frac{1}{S} \sum_{s = 1}^S p(y_i | \theta^s) \right)$. Following the workflow in Vehtari's `crossvalidation.Rmd` file, here's how to do so in a computationally stable way. We'll save the results in a column with `fake`.
+
+```{r }
+fake$lpd_posterior <- matrixStats::colLogSumExps(ll_all) - log(nrow(ll_all))
+```
+
+Now we'll save the results of the `add_criterion()` function within our model fit object.
+
+```{r, message = F}
+m11.8_all <- add_criterion(m11.8_all, criterion = "loo")
+```
+
+You can index the LOO-based log scores like so.
+
+```{r}
+m11.8_all$criteria$loo$pointwise[, "elpd_loo"]
+```
+
+We'll add those to the `fake` data and make Figure11.21.
+
+```{r, fig.width = 4, fig.height = 3.5}
+fake <-
+  fake %>% 
+  mutate(lpd_loo = m11.8_all$criteria$loo$pointwise[, "elpd_loo"])
+
+fake %>% 
+  pivot_longer(lpd_posterior:lpd_loo, values_to = "lpd") %>% 
+  
+  ggplot(aes(x = x, y = lpd)) +
+  geom_point(aes(shape = name)) +
+  geom_line(aes(group = x),
+            size = 1/4) +
+  scale_shape_manual(NULL, values = c(1, 19)) +
+  ylab("log predictive density") +
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.key.size = unit(0.35, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        legend.position = c(.13, .10),
+        legend.text = element_text(size = 6))
+```
+
+To see the estimate for the expected log predictive density (elpd), you can just use the `loo()` function. The `looic` row in the output is that same value multiplied by -2.
+
+```{r}
+loo(m11.8_all)
+```
+
+### 11.8.4 Overfitting and AIC.
+
+The AIC is a widely used alternative within the frequentist paradigm. For simple Gaussian models fit with flat priors, the LOO will often be very close to the AIC.
+
+### 11.8.5 Interpreting differences in log scores.
+
+> The log score is rarely given a direct interpretation; almost always we look at differences in the log score, comparing two or more models. The reference point is that adding a linear predictor that is pure noise and with a weak prior on the coefficient should increase the log score of the fitted by 0.5, in expectation, but should result in an expected *decrease* of 0.5 in the LOO log score. (p. 175, *emphasis* in the original)
+
+### 11.8.6 Demonstration of adding pure noise predictors to a model.
+
+> When predictors are added to a model--even if the predictors are pure noise--the fit to data and within-sample predictive measures will generally improve. The ability of model to fit to the data is desired in modeling, but when the model is fit using finite data the model will fit partly also to random noise. We want to be able to separate which parts of the data allow us to generalize to new data or from one part of the data to the rest of the data and which part of the data is random noise which we should not be able to predict. (p. 176)
+
+Once again, here's the summary for `m10.3`.
+
+```{r}
+print(m10.3,  robust = T)
+```
+
+Now add five pure noise variables to the `kidiq` as a matrix column.
+
+```{r}
+set.seed(11)
+
+kidiq <-
+  kidiq %>% 
+  mutate(noise = array(rnorm(5 * n(), mean = 0, sd = 1), c(n(), 5)))
+
+glimpse(kidiq)
+```
+
+Here's a quick look at those `noise` variables.
+
+```{r}
+head(kidiq$noise)
+```
+
+```{r m11.9, warning = F, message = F}
+m11.9 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs + mom_iq + noise,
+      seed = 11,
+      file = "fits/m11.09")
+```
+
+Check the summary.
+
+```{r}
+print(m11.9, robust = T)
+```
+
+Naturally, our `noise` coefficients will differ a bit from those in the text. Gelman et al didn't include a `seed` value when they generated their `noise` values. Here we compare the noise model `m11.9` and the original non-noise model `m10.3` by their posteriors for $\sigma$ and $R^2$.
+
+```{r, fig.width = 6.5, fig.height = 2.75}
+p1 <-
+  tibble(m10.3 = posterior_samples(m10.3) %>% pull(sigma),
+         m11.9 = posterior_samples(m11.9) %>% pull(sigma)) %>% 
+  pivot_longer(everything()) %>% 
+  
+  ggplot(aes(x = value, y = name)) +
+  stat_halfeye(.width = .95) +
+  labs(x = expression(sigma),
+       y = NULL)
+
+p2 <-
+  tibble(m10.3 = bayes_R2(m10.3, summary = F)[, 1],
+         m11.9 = bayes_R2(m11.9, summary = F)[, 1]) %>% 
+  pivot_longer(everything()) %>% 
+  
+  ggplot(aes(x = value, y = name)) +
+  stat_halfeye(.width = .95) +
+  scale_x_continuous(expression(Bayesian~italic(R)^2), limits = c(0, NA)) +
+  scale_y_discrete(NULL, breaks = NULL)
+
+(p1 + p2) & coord_cartesian(ylim = c(1.5, 2.5))
+```
+
+Now use `add_criterion()` to compute the LOO estimates.
+
+```{r, message = F}
+m10.3 <- add_criterion(m10.3, criterion = "loo")
+m11.9 <- add_criterion(m11.9, criterion = "loo")
+```
+
+We can use the `loo_compare()` function to compare the two models by their LOO predictive log score (elpd).
+
+```{r}
+loo_compare(m10.3, m11.9) %>% print(simplify = F)
+```
+
+The difference is less than one point. If we'd like to compare the models by their LOO $R^2$ values, we can get full posterior summaries with the `loo_R2()` function.
+
+```{r}
+loo_R2(m10.3, robust = T)
+loo_R2(m11.9, robust = T)
+```
+
+We have already fit the model `kid_score ~ mom_hs` back in Chapter 10. We saved it as `m10.1`.
+
+```{r m10.1_11, warning = F, message = F}
+m10.1 <-
+  brm(data = kidiq,
+      kid_score ~ mom_hs,
+      seed = 10,
+      file = "fits/m10.01")
+```
+
+Review the summary.
+
+```{r}
+print(m10.1, robust = T)
+```
+
+Now compute and review the LOO estimate.
+
+```{r, message = F}
+m10.1 <- add_criterion(m10.1, criterion = "loo")
+
+loo(m10.1)
+```
+
+Use `loo_compare()` to compute the difference in epld for `m10.3` and `m10.1`.
+
+```{r}
+loo_compare(m10.3, m10.1) %>% print(simplify = F)
+```
+
+In Chapter 10, we fit the model with the interaction between `mom_hs` and `mom_iq`, too. It was saved as `m10.4`. We've already loaded it earlier in this chapter. Review the summary.
+
+```{r}
+print(m10.4, robust = T)
+```
+
+Now compute the LOO for `m10.4` and compare it with `m10.3`.
+
+```{r, message = F}
+m10.4 <- add_criterion(m10.4, criterion = "loo")
+
+loo_compare(m10.3, m10.4) %>% print(simplify = F)
+```
+
+The interaction adds little to the model, when compared based on the LOO estimate. Finally, we'll compare `m10.1`, `m10.3`, and `m10.4` by the full posteriors of their LOO $R^2$ distributions.
+
+```{r, fig.width = 4.5, fig.height = 2.75}
+loo_r2 <-
+  tibble(m10.1 = loo_R2(m10.1, summary = F)[, 1],
+         m10.3 = loo_R2(m10.3, summary = F)[, 1],
+         m10.4 = loo_R2(m10.4, summary = F)[, 1])
+
+loo_r2 %>% 
+  pivot_longer(everything()) %>% 
+  
+  ggplot(aes(x = value, y = name)) +
+  stat_halfeye(.width = .95) +
+  labs(x = expression(LOO~italic(R)^2),
+       y = NULL) +
+  coord_cartesian(ylim = c(1.5, 3.25))
+```
+
+Interestingly enough, the LOO $R^2$ can sink below 0. You can compute formal $\Delta \text{LOO} R^2$ scores, too.
+
+```{r, fig.width = 4.5, fig.height = 2.75}
+loo_r2 %>% 
+  mutate(`m10.1 - m10.3` = m10.1 - m10.3,
+         `m10.1 - m10.4` = m10.1 - m10.4,
+         `m10.3 - m10.4` = m10.3 - m10.4) %>% 
+  pivot_longer(contains("-")) %>% 
+  
+  ggplot(aes(x = value, y = name)) +
+  stat_halfeye(.width = .95) +
+  labs(x = expression(Delta~LOO~italic(R)^2),
+       y = NULL) +
+  coord_cartesian(ylim = c(1.5, 3.25))
+```
+
+### 11.8.7 $K$-fold cross validation.
+
+> When leave-one-out cross validation is unstable--which would be indicated by a warning message after running `loo`--you can switch to $K$-*fold cross validation* in which the data are randomly partitioned into $K$ subsets, and the fit of each subset is evaluated based on a model fit to the rest of the data. This requires only $K$ new model fits. It is conventional to use $K = 10$. (p. 178, *emphasis* in the original)
+
+### 11.8.8 Demonstration of $K$-fold cross validation using simulated data.
+
+Make a $60 \times 30$ matrix of $n = 60$ cases and $k = 30$ highly-correlated predictor variables.
+
+```{r}
+# how many cases?
+n <- 60
+
+# how many predictors?
+k <- 30
+
+# the correlation among predictors
+rho <- 0.8
+
+# simulate
+set.seed(11)
+
+Sigma <- rho * array(1, c(k, k)) + (1 - rho) * diag(k) 
+# X <- MASS::mvrnorm(n, rep(0, k), Sigma)
+fake <- tibble(X = MASS::mvrnorm(n, rep(0, k), Sigma))
+# what did we do?
+str(fake)
+```
+
+Now define the data-generating $\beta$ values and use the 30 predictors to simulate the criterion, `y`.
+
+```{r}
+# define the beta coefficients
+b <- c(c(-1, 1, 2), rep(0, k - 3)) 
+
+# simulate y
+fake <-
+  fake %>% 
+  mutate(y = X %*% b + 2 * rnorm(n(), mean = 0, sd = 1))
+
+# what did we do?
+str(fake)
+```
+
+Fit the model using the $\operatorname N(0, 10)$ prior on the $\beta$ coefficients.
+
+```{r m11.10, warning = F, message = F}
+m11.10 <-
+  brm(data = fake,
+      y ~ X,
+      seed = 11,
+      prior = prior(normal(0, 10), class = b),
+      file = "fits/m11.10")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m11.10, robust = T)
+```
+
+Compute, save, and review the LOO estimate.
+
+```{r}
+m11.10 <- add_criterion(m11.10, criterion = "loo")
+loo(m11.10)
+```
+
+Like in the text, we received a warning about several observations "with a pareto_k > 0.7." One way to follow the recommendation in the warning is to perform $K$-fold validation with the `kfold()` function, as in the text. Perhaps a better way is to use the `add_criterion()` function with `criterion = "kfold"`. That way the results are saved to the model fit object.
+
+```{r, message = F, eval = F}
+m11.10 <- add_criterion(m11.10, criterion = "kfold", K = 10)
+```
+
+Now you can extract the $K$-fold summary like so.
+
+```{r}
+m11.10$criteria$kfold
+```
+
+"This is the estimated log score of the data under cross validation, and it is on the same scale as LOO" (p. 179). Our results are similar to those in the text.
+
+Now fit an alternative version of the model with the regularized horseshoe prior on the $\beta$ parameters.
+
+```{r m11.11, warning = F, message = F}
+m11.11 <-
+  brm(data = fake,
+      y ~ X,
+      prior = prior(horseshoe(1), class = b),
+      seed = 11,
+      control = list(adapt_delta = 0.95),
+      file = "fits/m11.11")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m11.11, robust = T)
+```
+
+Skip the LOO and jump straight into $K$-fold cross validation, saving the results directly in the model fit object.
+
+```{r, message = F, warning = F, eval = F}
+m11.11 <- add_criterion(m11.11, criterion = "kfold", K = 10)
+```
+
+Compare the two models with `loo_compare()`, where `criterion = "kfold"`.
+
+```{r}
+loo_compare(m11.10, m11.11, criterion = "kfold") %>% print(simplify = F)
+```
+
+You might be interested in comparing the modes with a coefficient plot focusing on the $\beta$ parameters.
+
+```{r, fig.width = 5, fig.height = 5.5}
+# combine the summaries for the two models
+bind_rows(
+  # m11.10
+  fixef(m11.10) %>% 
+    data.frame() %>% 
+    rownames_to_column("param") %>% 
+    mutate(fit = "m11.10"),
+  
+  # m11.11
+  fixef(m11.11) %>% 
+    data.frame() %>% 
+    rownames_to_column("param") %>% 
+    mutate(fit = "m11.11")
+) %>% 
+  # wrangle
+  filter(param != "Intercept") %>% 
+  mutate(param = factor(param,
+                        levels = str_c("X", 1:30),
+                        labels = str_c("X[", 1:30, "]"))) %>% 
+  
+  # plot!
+  ggplot(aes(x = param, y = Estimate, ymin = Q2.5, ymax = Q97.5, color = fit)) +
+  geom_hline(yintercept = 0, linetype = 2, size = 1/4) +
+  geom_linerange(position = position_dodge(width = 1/3), size = 1/4, key_glyph = "path") +
+  geom_point(position = position_dodge(width = 1/3), size = 1/2) +
+  scale_color_manual(NULL,
+                     values = c("grey50", "black"),
+                     guide = guide_legend(override.aes = list(angle = 90))) +
+  scale_x_discrete(NULL, labels = ggplot2:::parse_safe) +
+  ylab("marginal posterior") +
+  coord_flip() +
+  theme(axis.text.y = element_text(hjust = 0))
+```
+
+The horseshoe prior approach we uses for `m11.11` aggressively pulled the coefficients towards zero.
+
+### 11.8.9 Concerns about model selection.
+
+"Given several candidate models, we can use cross validation to compare their predictive performance. But it does not always make sense to choose the model that optimizes estimated predicted performance, for several reasons" (p. 180).
 
 ## Session info {-}
 
