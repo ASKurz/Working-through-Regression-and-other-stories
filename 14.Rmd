@@ -1,0 +1,1490 @@
+---
+title: "Chapter 14: Working with logistic regression"
+author: "A Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+options(width = 100)
+```
+
+# Working with logistic regression
+
+"With logistic, as with linear regression, fitting is only part of the story" (p. 241).
+
+## 14.1 Graphing logistic regression and binary data
+
+To make Figure 14.1, we'll need to simulate some data.
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+# set light-weight wrappers around the base R functions
+logit <- qlogis
+invlogit <- plogis
+
+# how many do you want?
+n <- 50
+
+# set the population parameters
+a <- 2
+b <- 3
+
+# simulate
+set.seed(14)
+
+fake_1 <- 
+  tibble(x = rnorm(n, mean = -a / b, sd = 4 / b),
+         y = rbinom(n, size = 1, p = invlogit(a + b * x)))
+
+# what did we do?
+head(fake_1)
+```
+
+Let's fit a quick logistic regression model with **brms**.
+
+```{r m14.1, warning = F, message = F}
+library(brms)
+
+m14.1 <-
+  brm(data = fake_1,
+      family = binomial,
+      y | trials(1) ~ x,
+      seed = 14,
+      file = "fits/m14.01")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m14.1, robust = T)
+```
+
+Now make Figure 14.1a.
+
+```{r, fig.width = 8, fig.height = 3, message = F}
+# set the global plotting theme
+theme_set(theme_linedraw() +
+            theme(panel.grid = element_blank()))
+
+nd <- tibble(x = seq(from = -4, to = 2, length.out = 100))
+
+# left
+p1 <-
+  fitted(m14.1, newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  rename(y = Estimate) %>% 
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_point(data = fake_1 %>% mutate(y = ifelse(y == 0, 0.01, 0.99)),
+             size = 3/4) +
+  geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5),
+              alpha = 1/4) +
+  geom_line(linetype = 2, size = 1/3) +
+  geom_function(fun = function(x) invlogit(a + b * x),
+                color = "blue", size = 1) +
+  annotate(geom = "text",
+           x = c(-0.8, -0.5), y = c(0.5, 0.2),
+           label = c("True Curve\ny = invlogit(2 + 3x)",
+                     "Fitted curve,\ny = invlogit(3.7 + 6.6x)"),
+           color = c("blue", "black"), hjust = c(1, 0), size = 3) +
+  scale_x_continuous(breaks = -3:2, expand = expansion(mult = 0.01)) +
+  scale_y_continuous(breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = "Data and curves") +
+  coord_cartesian(xlim = range(fake_1$x))
+
+# right
+p2 <- 
+  # make binned averages
+  fake_1 %>% 
+  mutate(bin = cut(x, breaks = -5:2 + 0.5)) %>%
+  mutate(x = as.numeric(bin) - 5) %>% 
+  group_by(bin, x) %>% 
+  summarise(p = mean(y)) %>%  # these are the binned averages
+  # adjust for the plot
+  mutate(y = ifelse(p == 0, 0.02,
+                    ifelse(p == 1, 0.98, p))) %>% 
+  
+  ggplot(aes(x = x, y = y)) +
+  geom_point(shape = 1, size = 2.25, color = "green2", stroke = 1.25) +
+  geom_point(data = fake_1 %>% mutate(y = ifelse(y == 0, 0.01, 0.99)),
+             size = 3/4) +
+  scale_x_continuous(breaks = -3:2, expand = expansion(mult = 0.01)) +
+  scale_y_continuous(breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = "Data and binned averages") +
+  coord_cartesian(xlim = range(fake_1$x))
+
+# combine
+library(patchwork)
+p1 + p2
+```
+
+Now simulate binary data with two Gaussian predictors.
+
+```{r }
+# how many would you like?
+n <- 100
+
+# set the population parameters
+beta <- c(2, 3, 4)
+
+# simulate
+set.seed(14)
+
+fake_2 <-
+  tibble(x1 = rnorm(n, mean = 0,    sd = 0.4),
+         x2 = rnorm(n, mean = -0.5, sd = 0.4)) %>% 
+  mutate(y = rbinom(n, size = 1, p = invlogit(beta[1] + beta[2] * x1 + beta[3] * x2)))
+
+# what did we do?
+head(fake_2)
+```
+
+Fit the bivariable logistic regression model.
+
+```{r m14.2, warning = F, message = F}
+m14.2 <-
+  brm(data = fake_2,
+      family = binomial,
+      y | trials(1) ~ x1 + x2,
+      seed = 14,
+      file = "fits/m14.02")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m14.2, robust = T)
+```
+
+Now we'll make our version of Figure 14.2, which will have an extra section.
+
+```{r, fig.width = 8, fig.height = 3.5, message = F}
+# right
+p1 <-
+  fake_2 %>% 
+  mutate(y = factor(y)) %>% 
+  
+  ggplot(aes(x = x1, y = x2)) +
+  geom_point(aes(shape = y)) +
+  geom_abline(intercept = -beta[1] / beta[3], slope = -beta[2] / beta[3]) +
+  geom_abline(intercept = (logit(0.9) - beta[1]) / beta[3], slope = -beta[2] / beta[3], 
+              linetype = 2, size = 1/4) +
+  geom_abline(intercept = (logit(0.1) - beta[1]) / beta[3], slope = -beta[2] / beta[3], 
+              linetype = 2, size = 1/4) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  labs(subtitle = "Data and 10%, 50%, 90% discrimination lines\nfrom idealized logistic regression")
+
+# range(fake_2$x1)
+# range(fake_2$x2)
+
+nd <-
+  crossing(x1 = seq(from = -0.9, to = 0.9, length.out = 50),
+           x2 = seq(from = -1.7, to = 0.5, length.out = 50))
+
+# left
+p2 <-
+  fitted(m14.2, newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+
+  ggplot(aes(x = x1, y = x2)) +
+  geom_raster(aes(fill = Estimate),
+              interpolate = T) +
+  geom_point(data = fake_2,
+             aes(shape = as.factor(y))) +
+  scale_shape_manual(values = c(19, 1), breaks = NULL) +
+  scale_fill_viridis_c(expression(italic(p)), option = "C", 
+                       breaks = 0:2 / 2, limits = 0:1) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  coord_cartesian(xlim = range(fake_2$x1),
+                  ylim = range(fake_2$x2)) +
+  labs(subtitle = "Data and expected probabilities\nfrom fitted logistic regression")
+
+# combine
+p1 + p2
+```
+
+"These dotted lines in Figure 14.2[a] do *not* represent uncertainty in the line; rather, they convey the variation inherent in the logistic regression model" (p. 242, *emphasis* in the original)
+
+## 14.2 Logistic regression with interactions
+
+Load the `wells.csv` data.
+
+```{r, message = F}
+wells <- read_csv("ROS-Examples-master/Arsenic/data/wells.csv")
+
+glimpse(wells)
+```
+
+Fit an interaction model.
+
+```{r m14.3}
+m14.3 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist100 + arsenic + dist100:arsenic,
+      seed = 14,
+      file = "fits/m14.03")
+```
+
+Check the results.
+
+```{r}
+print(m14.3, robust = T)
+```
+
+### 14.2.1 Centering the input variables.
+
+"As we discussed in the context of linear regression, before fitting interactions it makes sense to center the input variables so that we can more easily interpret the coefficients" (p. 243). Here we make centered versions of our predictors.
+
+```{r}
+wells <-
+  wells %>% 
+  mutate(c_dist100 = dist100 - mean(dist100),
+         c_arsenic = arsenic - mean(arsenic))
+```
+
+### 14.2.2 Re-fitting the interaction model using the centered inputs.
+
+Refit the interaction model with centered predictors.
+
+```{r m14.4}
+m14.4 <-
+  update(m14.3,
+         newdata = wells,
+         family = binomial,
+         switch | trials(1) ~ c_dist100 + c_arsenic + c_dist100:c_arsenic,
+         seed = 14,
+         file = "fits/m14.04")
+```
+
+Check the results.
+
+```{r}
+print(m14.4, robust = T)
+```
+
+### 14.2.3 Statistical significance of the interaction.
+
+Whether it be the model with the centered or non-centered predictors, the interaction term is not statistically significant in the conventional sense. The 95% intervals cross zero.
+
+```{r}
+fixef(m14.3, robust = T)[4, ] %>% round(digits = 2)
+fixef(m14.4, robust = T)[4, ] %>% round(digits = 2)
+```
+
+We might compare the interaction model with one without the interaction. Here we'll just use the un-centered versions of the predictors.
+
+```{r m14.5}
+m14.5 <-
+  update(m14.3,
+         newdata = wells,
+         family = binomial,
+         switch | trials(1) ~ dist100 + arsenic,
+         seed = 14,
+         file = "fits/m14.05")
+```
+
+Compute the LOO estimates.
+
+```{r, message = F}
+m14.3 <- add_criterion(m14.3, criterion = "loo")
+m14.5 <- add_criterion(m14.5, criterion = "loo")
+```
+
+Compare the two models by their LOO estimates.
+
+```{r}
+loo_compare(m14.3, m14.5) %>% print(simplify = F)
+```
+
+The LOO difference is trivial. Even so, it's still not necessarily wise to move forward as if the interaction term is exactly zero. To get a sense, let's plot.
+
+```{r, fig.width = 4, fig.height = 3}
+posterior_samples(m14.3) %>% 
+  ggplot(aes(x = `b_dist100:arsenic`)) +
+  geom_density(size = 0, fill = "grey67") +
+  geom_vline(xintercept = 0, linetype = 2, size = 1/3) +
+  scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
+  ggtitle("Zero is a credible value.",
+          subtitle = "Many other values are credible, too.")
+```
+
+### 14.2.4 Graphing the model with interactions.
+
+Make the `jitter_binary()` function from last chapter.
+
+```{r}
+jitter_binary <- function(a, jitt = 0.05) {
+  
+  ifelse(a==0, runif(length(a), 0, jitt), runif(length(a), 1 - jitt, 1))
+  
+}
+
+wells <-
+  wells %>% 
+  mutate(jitter_switch = jitter_binary(switch))
+```
+
+Now make Figure 14.3.
+
+```{r, fig.width = 7, fig.height = 2.75, warning = F}
+nd <-
+  crossing(dist100 = seq(from = 0, to = 3.5, length.out = 100),
+           arsenic = c(0.5, 1))
+
+# left 
+p1 <-
+  fitted(m14.3, newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  mutate(arsenic = factor(arsenic)) %>% 
+  
+  ggplot(aes(x = dist100)) +
+  geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5,
+                  fill = arsenic),
+              alpha = 1/3) +
+  geom_line(aes(y = Estimate, color = arsenic)) +
+  geom_point(data = wells,
+             aes(y = jitter_switch),
+             size = 1/10) +
+  scale_color_viridis_d(option = "A", end = .5) +
+  scale_fill_viridis_d(option = "A", end = .5) +
+  scale_x_continuous("Distance (in meters) to nearest safe well", 
+                     expand = c(0, 0), limits = c(0, 3.5),
+                     breaks = 0:3, labels = 0:3 * 100) +
+  scale_y_continuous("Pr (switching)", expand = c(0, 0), limits = 0:1) +
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.position = c(.85, .75))
+
+# range(wells$arsenic)
+nd <-
+  crossing(dist100 = c(0, 0.5),
+           arsenic = seq(from = 0, to = 10, length.out = 100))
+
+# right
+p2 <-
+  fitted(m14.3, newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  mutate(dist = (dist100 * 100) %>% as.factor()) %>% 
+
+  ggplot(aes(x = arsenic)) +
+  geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5,
+                  fill = dist),
+              alpha = 1/3) +
+  geom_line(aes(y = Estimate, color = dist)) +
+  geom_point(data = wells,
+             aes(y = jitter_switch),
+             size = 1/10) +
+  scale_color_viridis_d(option = "D", end = .5, direction = -1) +
+  scale_fill_viridis_d(option = "D", end = .5, direction = -1) +
+  scale_x_continuous("Arsenic concentration in well water", 
+                     expand = c(0, 0), limits = c(0, 9.7),
+                     breaks = 0:4 * 2) +
+  scale_y_continuous(NULL, breaks = NULL, expand = c(0, 0), limits = 0:1) +
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.position = c(.85, .75))
+
+# combine
+p1 + p2
+```
+
+"The interaction is small in the range of most of the data" (p. 245).
+
+### 14.2.5 Adding social predictors.
+
+Now fit the model that dropps the interaction term and adds to other predictors.
+
+```{r m14.6}
+m14.6 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist100 + arsenic + educ4 + assoc,
+      seed = 14,
+      file = "fits/m14.06")
+```
+
+Check the results.
+
+```{r}
+print(m14.6, robust = T)
+```
+
+Now drop the `assoc` predictor.
+
+```{r m14.7}
+m14.7 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist100 + arsenic + educ4,
+      seed = 14,
+      file = "fits/m14.07")
+```
+
+Check the results.
+
+```{r}
+print(m14.7, robust = T)
+```
+
+Compute the LOO estimates.
+
+```{r, message = F}
+m14.6 <- add_criterion(m14.6, criterion = "loo")
+m14.7 <- add_criterion(m14.7, criterion = "loo")
+```
+
+Compare the two models by their LOO estimates.
+
+```{r}
+loo_compare(m14.6, m14.7) %>% print(simplify = F)
+```
+
+### 14.2.6 Adding further interactions.
+
+Make a centered version of the `educ4` variable.
+
+```{r}
+wells <-
+  wells %>% 
+  mutate(c_educ4 = educ4 - mean(educ4))
+```
+
+Now include it in a couple interactions.
+
+```{r m14.8}
+m14.8 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ c_dist100 + c_arsenic + c_educ4 + c_dist100:c_educ4 + c_arsenic:c_educ4,
+      seed = 14,
+      file = "fits/m14.08")
+```
+
+Check the results.
+
+```{r}
+print(m14.8, robust = T)
+```
+
+The results reported in the text are odd in that the authors appear to have used `educ4` as the lower-order term, but used the centered version `c_educ4` in the interactions. Howevr, if you look at Vehtari's rendered exmaples (see [here](https://avehtari.github.io/ROS-Examples/Arsenic/arsenic_logistic_building.html#More_predictors)), you'll see he used our method where we only used `c_educ4`.
+
+Compute the LOO estimates.
+
+```{r, message = F}
+m14.8 <- add_criterion(m14.8, criterion = "loo")
+```
+
+Use the LOO estimates to compare this model to the earlier one which only included `dist100` and `arsenic`.
+
+```{r}
+loo_compare(m14.5, m14.8) %>% print(simplify = F)
+```
+
+### 14.2.7 Standardizing predictors.
+
+"We should think seriously about standardizing all predictors as a default option when fitting models with interactions" (p. 247).
+
+## 14.3 Predictive simulation
+
+"We can use the inferences from ~~`stan_glm`~~ `brms::brm()` to obtain simulations that we can then use to make probabilistic predictions" (p. 247).
+
+### 14.3.1 Simulating the uncertainty in the estimated coefficients.
+
+Fit a simplified model with `dist100` as the only predictor.
+
+```{r m14.9}
+m14.9 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ dist100,
+      seed = 14,
+      file = "fits/m14.09")
+```
+
+Check the results.
+
+```{r}
+print(m14.9, robust = T)
+```
+
+Make Figure 14.4.
+
+```{r, fig.width = 6.5, fig.height = 2.75, warning = F}
+# save the posterior draws
+post <- posterior_samples(m14.9)
+
+# left
+p1 <-
+  post %>% 
+  ggplot(aes(x = b_Intercept, y = b_dist100)) +
+  geom_point(size = 1/10, alpha = 2/3) +
+  labs(x = expression(beta[0]),
+       y = expression(beta[1])) +
+  coord_cartesian(ylim = c(NA, 0),
+                  xlim = c(0.2, 1))
+
+# how many posterior lines would you like
+n <- 20
+
+# right
+p2 <-
+  wells %>% 
+  ggplot(aes(x = dist100, y = jitter_switch)) + 
+  geom_point(size = 1/10) +
+  mapply(function(b0, b1) {
+    stat_function(fun = function(x) invlogit(b0 + b1 * x),
+                  size = 1/8, alpha = 1/2)
+  }, 
+  # enter intercepts and slopes
+  b0 = post[1:n, 1],
+  b1 = post[1:n, 2]
+  ) +
+  geom_function(fun = function(x) invlogit(fixef(m14.9, robust = T)[1, 1] + fixef(m14.9, robust = T)[2, 1] * x),
+                color = "blue") +
+  scale_x_continuous("Distance (in meters) to nearest safe well", 
+                     expand = c(0, 0), limits = c(0, 3.5),
+                     breaks = 0:3, labels = 0:3 * 100) +
+  scale_y_continuous("Pr (switching)", expand = c(0, 0), limits = 0:1) 
+
+p1 + p2 + plot_layout(widths = c(2, 3))
+```
+
+### 14.3.2 Predictive simulation using the binomial distribution.
+
+We'll make the bulk of the table in Figure 14.5 in this block.
+
+```{r}
+# define the new data, X^new
+set.seed(14)
+nd <- tibble(dist100 = runif(n = 10, min = 0, max = 2))
+
+post_sim <-
+  bind_cols(
+    #posterior draws
+    post %>% 
+      transmute(sim = 1:n(),
+                beta0 = b_Intercept,
+                beta1 = b_dist100),
+    
+    # posterior simulations
+    predict(m14.9,
+            newdata = nd, 
+            summary = F) %>% 
+      data.frame() %>% 
+      set_names(str_c("y0", 1:9), "y10")
+  )
+
+post_sim %>% 
+  select(-(y03:y09)) %>% 
+  slice(1:2, 4000)
+```
+
+Now compute the means depicted in the bottom row.
+
+```{r}
+post_sim %>%
+  pivot_longer(-sim) %>% 
+  group_by(name) %>% 
+  summarise(mean = mean(value) %>% round(digits = 2)) %>% 
+  pivot_wider(names_from = name, values_from = mean) %>% 
+  select(-(y03:y09))
+```
+
+You'll note our mean value for `beta1` is much lower than the one Gelman et al reported in their table. I'm pretty sure their value is the result of a typo.
+
+### 14.3.3 Predictive simulation using the latent logistic distribution.
+
+Recall the latent-variable formulation from Section 13.4, where
+
+> each discrete outcome $y_i$ is associated with a continuous, unobserved outcome $z_i$ , defined as follows:
+> 
+> $$
+> \begin{align*}
+> y_i & = \left \{
+>   \begin{array}{@{}ll@{}}
+>     1 & \text{if}\ z_i > 0 \\
+>     0 & \text{if}\ z_i < 0
+>   \end{array} \right. \\
+> z_i & = X_i \beta + \epsilon_i, 
+> \end{align*}
+> $$
+> 
+> with independent errors $\epsilon_i$ that have the *logistic* probability distribution. The logistic distribution is shown in Figure 13.5 and is defined so that
+> 
+> $$\operatorname{Pr}(\epsilon_i < x) = \operatorname{logit}^{-1} (x)\ \text{for all}\ x.$$
+> 
+> Thus, $\operatorname{Pr}(y_i = 1) = \operatorname{Pr}(z_i > 0) = \operatorname{Pr}(\epsilon_i > -X_i \beta) = \operatorname{logit}^{-1}(X_i \beta)$. (p. 226, *emphasis* in the original)
+
+As far as I can tell, the **brms**-convenience-function based approach to simulating "logistic regression predictions us[ing] the latent-data formulation" (p. 248) is a little cumbersome. Here are the steps. First, we poll the log-odds probabilities for the $X^\text{new}$ values (`nd`) using `fitted()`.
+
+```{r}
+log_odds_p <-
+  fitted(m14.9,
+         newdata = nd, 
+         summary = F, 
+         scale = "linear") %>% 
+  data.frame() %>% 
+  set_names(str_c("f0", 1:9), "f10")
+
+glimpse(log_odds_p)
+```
+
+Seocnd, we make a $4{,}000 \times 10$ data frame for the $\epsilon^\text{new}$ values.
+
+```{r}
+set.seed(14)
+
+epsilon_new <-
+  tibble(name  = c(str_c("e0", 1:9), "e10"),
+         value = logit(runif(10, 0, 1)),
+         count = 4000) %>% 
+  uncount(count, .id = "sim") %>% 
+  pivot_wider(names_from = name, values_from = value) %>% 
+  select(-sim)
+
+glimpse(epsilon_new)
+```
+
+Third, combine those two to make a data frame for the $x^\text{new}$ scores.
+
+```{r}
+z_new <- log_odds_p + epsilon_new
+
+glimpse(z_new)
+```
+
+Fourth, convert the $z$ scores to 0's and 1's.
+
+```{r}
+y_new <-
+  z_new %>% 
+  mutate_all(.funs = ~ ifelse(. > 0, 1, 0)) %>% 
+  set_names(str_c("y0", 1:9), "y10")
+
+glimpse(y_new)
+```
+
+Here are the counts, by column.
+
+```{r}
+y_new %>% 
+  pivot_longer(everything(), values_to = "count") %>% 
+  group_by(name) %>% 
+  count(count) %>% 
+  pivot_wider(names_from = name, 
+              values_from = n, 
+              values_fill = 0)
+```
+
+## 14.4 Average predictive comparisons on the probability scale
+
+> Logistic regressions are nonlinear on the probability scale and linear on the logit scale. This is because logistic regression is linear in the parameters but nonlinear in the relation of inputs to outcome. A specified difference in one of the $x$ variables does *not* correspond to a constant difference in $\operatorname{Pr}(y = 1)$. As a result, logistic regression coefficients cannot directly be interpreted on the scale of the data. Logistic regressions are inherently more difficult than linear regressions to interpret.
+> 
+> [Even still,] it is helpful to have a summary, comparable to the linear regression coefficient, which gives the expected, or average, difference in $\operatorname{Pr}(y = 1)$ corresponding to a unit difference in each of the input variables. In this section we describe a way to construct such a summary. (p. 249, *emphasis* in the original)
+
+Imagine modeling a binary $y$ variable with input data $x$. Those $x$ input data can be divided in to the data from the predictor of interest, $u$, and the remaining predictors, $v$. Thus our input data are $x = (u, v)$.
+
+We can compare a high ($u^\text{high}$) and low ($u^\text{low}$) value for our predictor of interest with all other inputs ($v$) held constant, following the formula
+
+$$\text{predictive difference} = \operatorname E(y | u^\text{high}, v, \theta) - \operatorname E(y | u^\text{low}, v, \theta),$$
+
+where $\theta$ is a stand-in for the model parameters and the *predictive difference* is our summary. An important thing to grasp, here, is this isn't a simple counterfactual of the kind we'd plot with `conditional_effects()`. The predictive difference is based systemically varying the $u$ values while retaining all the $v$ inputs from the original data. Thus, the validity of the predictive difference approach is tethered to the validity of the sample data.
+
+### 14.4.1 Problems with evaluating predictive comparisons at a central value.
+
+Other approaches, such as more conventional counterfactual approaches done with `conditional_effects()` or `fitted()`, can fail if the $v$ input data are binary, bimodal, or widely dispersed. In those cases, it's hard to know what values to fix the counterfactual $v$ values on. 
+
+It looks like we don't have the data necessary to reproduce Figures 14.6 and 14.7.
+
+### 14.4.2 Demonstration with the well-switching example.
+
+Review the summary from model `m14.7`.
+
+```{r}
+print(m14.7, robust = T)
+```
+
+#### 14.4.2.1 Average predictive difference in probability of switching.
+
+On page 251 we read:
+
+> We average the predictive differences over the $n$ households in the data to obtain:
+>
+> $$\text{average predictive difference:} = \frac{1}{n} \sum_{i=1}^n \delta (\text{arsenic}_i, \text{educ4}_i).$$
+
+Here's how to do this in code for a low value of `dist100 == 0` and a high value of `dist100 == 1`.
+
+```{r}
+# pull the posterior medians of the beta's
+b <- fixef(m14.7, robust = T)[, 1]
+
+# set the high and low values for the predictor of interest, dist100
+lo <- 0
+hi <- 1
+
+# compute the delta distribution using the values, above, and the data
+delta <- invlogit(b[1] + b[2]*hi + b[3]*wells$arsenic + b[4]*wells$educ4) -
+         invlogit(b[1] + b[2]*lo + b[3]*wells$arsenic + b[4]*wells$educ4)
+
+# what is the mean for delta?
+round(mean(delta), 2)
+```
+
+Here's a more tibble-centric way of walking out that computation.
+
+```{r}
+wells %>% 
+  select(arsenic, educ4) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * hi + b2 * arsenic + b3 * educ4),
+         e_lo = invlogit(b0 + b1 * lo + b2 * arsenic + b3 * educ4)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  summarise(mu_delta = mean(delta))
+```
+
+To good sense of what's going on with that workflow, execute all the lines before the final `summarise()` line. It'll be like checking the work. Another thing that might help is to look at the distribution of the `delta` values.
+
+```{r, fig.width = 4, fig.height = 2.75}
+wells %>% 
+  select(arsenic, educ4) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * hi + b2 * arsenic + b3 * educ4),
+         e_lo = invlogit(b0 + b1 * lo + b2 * arsenic + b3 * educ4)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  
+  ggplot(aes(x = delta)) +
+  geom_histogram(binwidth = 0.01, boundary = 0) +
+  # add in the mean of delta as a reference point
+  geom_vline(xintercept = mean(delta), color = "red3", linetype = 2)
+```
+
+The crucial point for this computation is that it is *on average in the data*:
+
+> The result is −0.21, implying that, on average in the data, households that are 100 meters from the nearest safe well are 21% less likely to switch, compared to households that are right next to the nearest safe well, at the same arsenic and education levels. (p. 251)
+
+#### 14.4.2.2 Comparing probabilities of switching for households differing in arsenic levels.
+
+Now use this approach holding `dist100` and `educ4` constant, but varying `arsenic` such that the low value is `arsenic == 0.5` and the high value is `arsenic == 1`.
+
+```{r}
+lo <- 0.5
+hi <- 1
+
+wells %>% 
+  select(dist100, educ4) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * dist100 + b2 * hi + b3 * educ4),
+         e_lo = invlogit(b0 + b1 * dist100 + b2 * lo + b3 * educ4)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  summarise(mu_delta = mean(delta))
+```
+
+Here's a histogram of the new $\delta$ distribution.
+
+```{r, fig.width = 4, fig.height = 2.75}
+wells %>% 
+  select(dist100, educ4) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * dist100 + b2 * hi + b3 * educ4),
+         e_lo = invlogit(b0 + b1 * dist100 + b2 * lo + b3 * educ4)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  
+  ggplot(aes(x = delta)) +
+  geom_histogram(binwidth = 0.001, boundary = 0)
+```
+
+"So this comparison corresponds to a [about] 6% difference in probability of switching" (p. 252).
+
+#### 14.4.2.3 Average predictive difference in probability of switching, comparing householders with 0 and 12 years of education.
+
+Now use this approach holding `dist100` and `arsenic` constant, but varying `educ4` such that the low value is `educ4 == 0` and the high value is `educ4 == 3`.
+
+```{r}
+lo <- 0
+hi <- 3
+
+wells %>% 
+  select(dist100, arsenic) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * dist100 + b2 * arsenic + b3 * hi),
+         e_lo = invlogit(b0 + b1 * dist100 + b2 * arsenic + b3 * lo)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  summarise(mu_delta = mean(delta))
+```
+
+Here's a histogram of the new $\delta$ distribution.
+
+```{r, fig.width = 4, fig.height = 2.75}
+wells %>% 
+  select(dist100, arsenic) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * dist100 + b2 * arsenic + b3 * hi),
+         e_lo = invlogit(b0 + b1 * dist100 + b2 * arsenic + b3 * lo)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  
+  ggplot(aes(x = delta)) +
+  geom_histogram(binwidth = 0.005, boundary = 0)
+```
+
+This "comes to [about] 0.12, a difference of [about] 12 percentage points" (p. 252).
+
+### 14.4.3 Average predictive comparisons in the presence of interactions.
+
+Review the parameter summary for the double-interaction model, `m14.8`.
+
+```{r}
+print(m14.8, robust = T)
+```
+
+We can extend the approach from the past few sections to our interaction model. Here we hold `c_arsenic` and `c_educ4`, while we vary `c_dist100` such that the low value is `c_dist100 == 0` and the high value is `c_dist100 == 1`.
+
+```{r}
+b <- fixef(m14.8, robust = T)[, 1]
+lo <- 0
+hi <- 1
+
+wells %>% 
+  select(c_dist100, c_arsenic, c_educ4) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4],
+         b4 = b[5],
+         b5 = b[6]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * hi + b2 * c_arsenic + b3 * c_educ4 + b4 * hi * c_educ4 + b5 * c_arsenic * c_educ4),
+         e_lo = invlogit(b0 + b1 * lo + b2 * c_arsenic + b3 * c_educ4 + b4 * lo * c_educ4 + b5 * c_arsenic * c_educ4)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  summarise(mu_delta = mean(delta))
+```
+
+Here's the histogram for our new $\delta$ distribution.
+
+```{r, fig.width = 4, fig.height = 2.75}
+wells %>% 
+  select(c_dist100, c_arsenic, c_educ4) %>% 
+  mutate(hi = hi,
+         lo = lo,
+         b0 = b[1],
+         b1 = b[2],
+         b2 = b[3],
+         b3 = b[4],
+         b4 = b[5],
+         b5 = b[6]) %>% 
+  mutate(e_hi = invlogit(b0 + b1 * hi + b2 * c_arsenic + b3 * c_educ4 + b4 * hi * c_educ4 + b5 * c_arsenic * c_educ4),
+         e_lo = invlogit(b0 + b1 * lo + b2 * c_arsenic + b3 * c_educ4 + b4 * lo * c_educ4 + b5 * c_arsenic * c_educ4)) %>% 
+  mutate(delta = e_hi - e_lo) %>% 
+  
+  ggplot(aes(x = delta)) +
+  geom_histogram(binwidth = 0.01, boundary = 0) +
+  geom_vline(xintercept = -0.2063539, color = "red3", linetype = 2) +
+  xlab(expression(delta))
+```
+
+## 14.5 Residuals for discrete-data regression
+
+### 14.5.1 Residuals and binned residuals
+
+> We can define residuals for logistic regression, as with linear regression, as observed minus expected values:
+>
+> $$\text{residual}_i = y_i - \operatorname E(y_i | X_i) = y_i - \operatorname{logit}^{-1} (X_i \beta).$$
+>
+> The data $y_i$ are discrete and so are the residuals. For example, if $\operatorname{logit}^{-1} (X_i \beta) = 0.7$, then $\text{residual}_i = −0.7$ or $+0.3$, depending on whether $y_i = 0$ or $1$. As a result, plots of raw residuals from logistic regression are generally not useful. (p. 253)
+
+We've already seen in Chapter 11, residuals for Bayesian models have uncertainty, just like the posterior distributions have uncertainty. Figure 14.8 in the text is based on using just the point estimates for both the posterior ($x$-axis) and the residuals ($y$-axis). Here we'll augment our version of the plot by adding the 95% intervals for the residuals.
+
+```{r, fig.width = 3.5, fig.height = 2.75}
+# left
+r <- residuals(m14.8)
+f <- fitted(m14.8)
+
+p1 <-
+  tibble(res = r[, 1],
+         rll = r[, 3],
+         rul = r[, 4],
+         ftd = f[, 1]) %>% 
+  ggplot(aes(x = ftd, y = res, ymin = rll, ymax = rul)) +
+  geom_hline(yintercept = 0, size = 1/4, color = "grey75") +
+  scale_x_continuous(breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
+  geom_pointrange(size = 1/10, fatten = 1/4) +
+  labs(subtitle = "Residual plot",
+       x = "Estimated Pr (switching)",
+       y = "Observed - Estimated")
+
+
+p1
+```
+
+> We [can] plot *binned residuals* by dividing the data into categories (bins) based on their fitted values, and then plotting the average residual versus the average fitted value for each bin. The result appears in Figure 14.8b; here we divided the data into 40 bins of equal size. There is typically some arbitrariness in choosing the number of bins: we want each bin to contain enough points so that the averaged residuals are not too noisy, but it helps to have many bins to see local patterns in the residuals. For this example, 40 bins seemed to give sufficient resolution, while still having enough points per bin. (p. 253, *emphasis* in the original)
+
+You can go [here](https://avehtari.github.io/ROS-Examples/Arsenic/arsenic_logistic_residuals.html#Binned_residual_plots) to see the base **R** Vehtari used to make the version of the binned residuals plot in the text. Our approach will be to use `brms::pp_check()` with `type = "error_binned"`, which is a thin wrapper around `bayesplot::ppc_error_binned()`. To follow along with the text, we'll use 40 bins by setting `bins = 40`.
+
+```{r, fig.width = 7, fig.height = 2.75}
+# right
+set.seed(14)
+
+p2 <-
+  pp_check(m14.8, type = "error_binned", nsamples = 1, bins = 40) +
+  labs(subtitle = "Binned residual plot",
+       x = "Estimated Pr (switching)",
+       y = "Average residual")
+
+# combine
+p1 + p2
+```
+
+You may have notices we set a seed value, above. Making binned residuals, like this, is a stochastic process. To get a sense, here we set `nsamples = 9`.
+
+```{r, fig.width = 7.5, fig.height = 5.5}
+pp_check(m14.8, type = "error_binned", nsamples = 9, bins = 40) +
+  ggtitle("Binned residual plots have random elements.",
+          subtitle = "Here are nine random draws.")
+```
+
+### 14.5.2 Plotting binned residuals versus inputs of interest.
+
+I'm not aware that the variants of the binned residual plots of Figure 14.9 are possible with wither `brms::pp_check()` or with its parent function, `bayesplot::ppc_error_binned()`. Here we'll make the plots in Figure 14.9 using Vehtari's `binned_resids()` function, which you can find [here](https://avehtari.github.io/ROS-Examples/Arsenic/arsenic_logistic_residuals.html#Binned_residual_plots). First, define the `binned_resids()` function.
+
+```{r}
+binned_resids <- function(x, y, nclass = sqrt(length(x))) {
+  
+  breaks.index <- floor(length(x) * (1:(nclass - 1)) / nclass)
+  breaks   <- c(-Inf, sort(x)[breaks.index], Inf)
+  output   <- NULL
+  xbreaks  <- NULL
+  x.binned <- as.numeric (cut (x, breaks))
+  
+  for (i in 1:nclass) {
+    items   <- (1:length(x))[x.binned == i]
+    x.range <- range(x[items])
+    xbar    <- mean(x[items])
+    ybar    <- mean(y[items])
+    n       <- length(items)
+    sdev    <- sd(y[items])
+    output  <- rbind(output, c(xbar, ybar, n, x.range, 2 * sdev / sqrt(n)))
+  }
+  
+  colnames (output) <- c("xbar", "ybar", "n", "x.lo", "x.hi", "2se")
+  
+  return (list (binned = output, xbreaks = xbreaks))
+  
+}
+```
+
+Now make the plots.
+
+```{r, fig.width = 7, fig.height = 2.75}
+# left
+p1 <-
+  binned_resids(x = wells$dist100, y = r[, 1], nclass = 40)$binned %>% 
+  data.frame() %>% 
+  
+  ggplot(aes(x = xbar)) +
+  geom_ribbon(aes(ymin = -X2se, ymax = X2se),
+              # colors from https://www.color-hex.com/color/ffa500#:~:text=%23ffa500%20color%20name%20is%20Orange,of%20its%20RGB%20is%200.
+              fill = "#fff6e5", color = "#ffdb99") +
+  geom_hline(yintercept = 0, color = "#ffb732", size = 1/4, linetype = 2) +
+  geom_point(aes(y = ybar),
+             size = 1/3) +
+  scale_x_continuous("Distance to nearest safe well",
+                     breaks = 0:3 * 0.5, labels = 0:3 * 0.5 * 100) +
+  ylab("Average residual")
+
+# right
+p2 <-
+  binned_resids(x = wells$arsenic, y = r[, 1], nclass = 40)$binned %>% 
+  data.frame() %>% 
+  
+  ggplot(aes(x = xbar)) +
+  geom_ribbon(aes(ymin = -X2se, ymax = X2se),
+              # colors from https://www.colorhexa.com/800080
+              fill = "#ffe2ff", color = "#ffbbff") +
+  geom_hline(yintercept = 0, color = "#ff80ff", size = 1/4, linetype = 2) +
+  geom_point(aes(y = ybar),
+             size = 1/3) +
+  scale_x_continuous("Arsenic level", breaks = 0:5, limits = c(0, NA)) +
+  ylab("Average residual")
+
+# combine
+p1 + p2 + plot_annotation(title = "Binned residual plots")
+```
+
+### 14.5.3 Improving a model by transformation.
+
+> To experienced regression modelers, a rising and then falling pattern of residuals such as in Figure 14.9b is a signal to consider taking the logarithm of the predictor on the $x$-axis--in this case, arsenic level. Another option would be to add a quadratic term to the regression; however, since arsenic is an all-positive variable, it makes sense to consider its logarithm. (p. 254)
+
+First, make a `log_arsenic` variable and a centered version of the same, `c_log_arsenic`.
+
+```{r}
+wells <-
+  wells %>% 
+  mutate(log_arsenic = log(arsenic)) %>% 
+  mutate(c_log_arsenic = log_arsenic - mean(log_arsenic))
+```
+
+Now fit an updated version of `m14.8`, called `m14.10`.
+
+```{r m14.10}
+m14.10 <-
+  brm(data = wells,
+      family = binomial,
+      switch | trials(1) ~ c_dist100 + c_log_arsenic + c_educ4 + c_dist100:c_educ4 + c_log_arsenic:c_educ4,
+      seed = 14,
+      file = "fits/m14.10")
+```
+
+Check the results.
+
+```{r}
+print(m14.10, robust = T)
+```
+
+Compute LOO estimate.
+
+```{r, message = F}
+m14.10 <- add_criterion(m14.10, criterion = "loo")
+```
+
+Compare this model with the earlier one, `m14.8`.
+
+```{r}
+loo_compare(m14.8, m14.10, criterion = "loo") %>% print(simplify = F)
+```
+
+Yep, taking the log of `arsenic` seemed to  help. Now make Figure 14.10.
+
+```{r, fig.width = 7, fig.height = 3}
+# left
+nd <-
+  crossing(c_educ4 = 0,
+           c_dist100 = c(0, 0.5) - mean(wells$dist100),
+           c_log_arsenic = seq(from = min(wells$c_log_arsenic), to = max(wells$c_log_arsenic), length.out = 100)) %>% 
+  mutate(dist100 = c_dist100 + mean(wells$dist100),
+         arsenic = exp(c_log_arsenic + mean(wells$log_arsenic)))
+
+p1 <-
+  fitted(m14.10, newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  mutate(dist = (dist100 * 100) %>% as.factor()) %>%
+  ggplot(aes(x = arsenic)) +
+  geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5,
+                  fill = dist),
+              alpha = 1/3) +
+  geom_line(aes(y = Estimate, color = dist)) +
+  geom_point(data = wells,
+             aes(y = jitter_switch),
+             size = 1/10) +
+  scale_color_viridis_d(option = "D", end = .5, direction = -1) +
+  scale_fill_viridis_d(option = "D", end = .5, direction = -1) +
+  scale_x_continuous("Arsenic concentration in well water", 
+                     expand = c(0, 0), limits = c(0, 9.7),
+                     breaks = 0:4 * 2) +
+  scale_y_continuous("Pr (switching)", expand = c(0, 0), limits = 0:1) +
+  labs(subtitle = "Fitted logistic regression of probability") +
+  theme(legend.background = element_rect(fill = "transparent"),
+        legend.position = c(.85, .67))
+
+# right
+p2 <-
+  binned_resids(x = wells$arsenic, y = residuals(m14.10)[, 1], nclass = 40)$binned %>% 
+  data.frame() %>% 
+  
+  ggplot(aes(x = xbar)) +
+  geom_ribbon(aes(ymin = -X2se, ymax = X2se),
+              # colors from https://www.colorhexa.com/800080
+              fill = "#ffe2ff", color = "#ffbbff") +
+  geom_hline(yintercept = 0, color = "#ff80ff", size = 1/4, linetype = 2) +
+  geom_point(aes(y = ybar),
+             size = 1/3) +
+  scale_x_continuous("Arsenic level", breaks = 0:5, limits = c(0, NA)) +
+  labs(subtitle = "Binned residuals",
+       y = "Average residual")
+
+# combine
+p1 + p2 + plot_annotation(title = "Plots for model with log (arsenic)")
+```
+
+"Compared to the earlier model, the residuals look better, but a problem remains at the very low end. Users of wells with arsenic levels just above 0.50 are less likely to switch than predicted by the model" (p. 254).
+
+### 14.5.4 Error rate and comparison to the null model.
+
+"The *error rate* is defined as the proportion of cases for which the deterministic prediction-guessing $y_i = 1\ \text{if}\ \operatorname{logit}^{−1} (X_i \beta) > 0.5$ and guessing $y_i = 0\ \text{if}\ \operatorname{logit}^{−1} (X_i \beta) < 0.5$--is wrong" (p. 255, *emphasis* in the original).
+
+Here's the error rate for the *null model*, the model that only has an intercept, which is the same as the proportion of 1's in the data.
+
+```{r}
+wells %>% 
+  select(switch) %>% 
+  # compute the intercept of the null model, the proportion of 1's
+  mutate(e_prob = mean(switch)) %>% 
+  summarise(mean = mean((e_prob > 0.5 & switch == 0) | (e_prob < 0.5 & switch == 1)))
+```
+
+Here's the error rate for our last model, `m14.10`.
+
+```{r}
+wells %>% 
+  select(switch) %>% 
+  # pull the means of the summaries from fitted()
+  mutate(e_prob = fitted(m14.10)[, 1]) %>% 
+  summarise(mean = mean((e_prob > 0.5 & switch == 0) | (e_prob < 0.5 & switch == 1)))
+```
+
+### 14.5.5 Where error rate can mislead.
+
+"The error rate can be a useful summary, but it does not tell the whole story, especially in settings where predicted probabilities are close to zero" (p. 255).
+
+## 14.6 Identification and separation
+
+Two reasons a logistic regression model might be non-identified are:
+
+* if two or more predictors are highly collinear, or
+* if there is complete separation of the criterion based on a threshold value $T$ in one of the predictors (i.e., perfect prediction).
+
+Load the `nes.txt` data.
+
+```{r }
+nes <- 
+  read.table("ROS-Examples-master/NES/data/nes.txt", header = T)
+
+head(nes)
+```
+
+Drop missing cases and make sure the remaining votes were only for the Republican or Democratic candidates.
+
+```{r}
+nes <-
+  nes %>% 
+  filter(!is.na(rvote) & !is.na(dvote) & (rvote == 1 | dvote == 1))
+
+dim(nes)
+```
+
+Now fit four models. In each, we'll predict `rvote` with the covariates `female`, `black`, and `income`. The models will be separated by the four years in the `year` column.
+
+```{r m14.11}
+m14.11 <-
+  brm(data = nes %>% filter(year == 1960),
+      family = binomial,
+      rvote | trials(1) ~ 1 + female + black + income,
+      seed = 14,
+      file = "fits/m14.11")
+
+m14.12 <-
+  update(m14.11,
+         newdata = nes %>% filter(year == 1964),
+         seed = 14,
+         file = "fits/m14.12")
+
+m14.13 <-
+  update(m14.11,
+         newdata = nes %>% filter(year == 1968),
+         seed = 14,
+         file = "fits/m14.13")
+
+m14.14 <-
+  update(m14.11,
+         newdata = nes %>% filter(year == 1972),
+         seed = 14,
+         file = "fits/m14.14")
+```
+
+You can check the results with `print()`, if you want. To avoid clutter, I'm going to instead show the parameter summaries with a faceted coefficient plot.
+
+```{r, fig.width = 6, fig.height = 2.5}
+tibble(year = factor(c(1960, 1964, 1968, 1972)),
+       fit  = str_c("m14.1", 1:4)) %>% 
+  mutate(fixef = map(fit, ~get(.) %>% 
+                       fixef(robust = T) %>% 
+                       data.frame() %>% 
+                       rownames_to_column("parameter"))) %>% 
+  unnest(fixef) %>% 
+  
+  ggplot(aes(x = Estimate, xmin = Q2.5, xmax = Q97.5, y = year)) +
+  geom_pointrange(aes(color = Est.Error > 20),
+                  fatten = 1) +
+  scale_color_viridis_d(option = "A", end = .55, breaks = NULL) +
+  xlab(expression("Marginal posterior for "*beta[x])) +
+  ylab(NULL) +
+  facet_wrap(~ parameter, scales = "free_x")
+```
+
+The $\beta_x$ estimates bounce around from year to year, as one would expect. But holy smokes look at the disaster for $\beta_\text{black}$ for 1964! Here are the numbers from `fixef()`.
+
+```{r}
+fixef(m14.12, robust = T)["black", ]
+```
+
+For a logistic regression model, those are some rough numbers. To get a sense of where the trouble is coming from, we'll make a tile plot.
+
+```{r, fig.width = 3.25, fig.height = 2}
+nes %>% 
+  filter(year == 1964) %>%
+  mutate(black = factor(black),
+         rvote = factor(rvote)) %>% 
+  count(black, rvote, .drop = F) %>%
+  
+  ggplot(aes(x = black, y = rvote)) +
+  geom_tile(aes(fill = n)) +
+  geom_text(aes(label = n, color = n > 400)) +
+  scale_fill_viridis_c(expression(italic(n)), option = "A", 
+                       limits = c(0, 1058), breaks = c(0, 1058 / 2, 1058)) +
+  scale_color_manual(values = c("white", "black"), breaks = NULL) +
+  theme(legend.text.align = 1)
+```
+
+Turns out that in the this sample of the data for the 1964 election, none of the Black voters endorsed the Republican candidate, Barry Goldwater (see [here](https://en.wikipedia.org/wiki/1964_United_States_presidential_election)). This is and example of separation.
+
+It's beyond my current skill set to make a *profile likelihood* plot for the maximum likelihood version of our $\beta_\text{black | 1964}$ coefficient. But to further help us get a sense of what's going on, here we'll plot the marginal fitted trajectories of $\beta_\text{black}$ for 1964.
+
+```{r, fig.width = 6, fig.height = 2.75}
+nd <-
+  tibble(female = 0.5406427,
+         income = 3.007561,
+         black = seq(from = 0, to = 1, length.out = 200))
+
+#left
+p1 <-
+  fitted(m14.12,
+         newdata = nd,
+         scale = "linear") %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  ggplot(aes(x = black)) +
+  geom_ribbon(aes(ymin= Q2.5, ymax = Q97.5),
+              alpha = 1/4) +
+  geom_line(aes(y = Estimate)) +
+  scale_x_continuous(breaks = 0:1) +
+  scale_y_continuous("log-odds probability", limits = c(NA, 0))
+
+# right
+p2 <-
+  fitted(m14.12, newdata = nd) %>% 
+  data.frame() %>% 
+  bind_cols(nd) %>% 
+  
+  ggplot(aes(x = black)) +
+  geom_ribbon(aes(ymin= Q2.5, ymax = Q97.5),
+              alpha = 1/4) +
+  geom_line(aes(y = Estimate)) +
+  scale_x_continuous(breaks = 0:1) +
+  scale_y_continuous("probability", limits = c(0, 0.5))
+
+# combine
+p1 + p2 + plot_annotation(title = "Marginal fitted trajectories of black for 1964")
+```
+
+The extreme certainty that $p \rightarrow 0$ for Black voters depicted in the plot on the right has to be understood in the massive uncertainty of how to best express that probability on the log-odds scale, as shown in the plot on the left. Basically, values much below -4 all mean "virtually never" on the log-odds-probability scale. Thus it's hard to distinguish between whether the posterior should be -5, -50, or even -500. They're all basically zero after you convert them to the probability metric.
+
+Now we prep for Figure 14.14. Our approach will be a little different from the one in the text. Whereas Gelman et al fit a series of models using maximum likelihood for the top row plots, we will be fitting the models with **brms** using the default flat priors on the $\beta$ coefficients. To streamline the process, it'll help if we make a custom function into which we'll feed different subsets of the data, by `year`, fit the desired model, and extract the coefficient summaries for the parameters of interest. We'll call our function `update_fit()`
+
+```{r}
+update_fit <- function(data, ...) {
+  
+  update(m14.11, 
+         newdata = data,
+         cores = 4, 
+         seed = 14,
+         ...) %>%
+    fixef(robust = T) %>% 
+    data.frame() %>% 
+    rownames_to_column("parameter")
+
+}
+```
+
+Now fit the models and save their results into an object called `fits1`.
+
+```{r, eval = F}
+fits1 <-
+  nes %>% 
+  nest(data = -year) %>% 
+  filter(year %in% c(1952 + 0:12 * 4)) %>% 
+  mutate(fixef = map(data, update_fit)) %>% 
+  select(-data)
+```
+
+To prepare for the plots in the bottom row of Figure 14.14, we'll fit a series of models using weakly-regularizing priors on the $\beta$ parameters. In the text, Gelman et al reported they used the default priors from `stan_glm()`. Back on pages 228--229, we learned for logistic regression models of this kind, `stan_glm()` defaults to weakly-informative priors "with mean 0 and standard deviation $2.5/\operatorname{sd}(x_k)$," where $x_k$ is the $k$^th^ predictor connected to the $k$^th^ $\beta$ coefficient. To make this work for **brms**, we'll need to redefine our `update_fit()` function.
+
+```{r}
+update_fit <- function(data, ...) {
+  
+  sd_female <- sd(data$female)
+  sd_black  <- sd(data$black)
+  sd_income <- sd(data$income)
+  
+  stanvars <- 
+    stanvar(sd_female, name = "sd_female") +
+    stanvar(sd_black,  name = "sd_black") +
+    stanvar(sd_income, name = "sd_income")
+  
+  priors <- 
+    prior(normal(0, 2.5 / sd_female), class = b, coef = female) +
+    prior(normal(0, 2.5 / sd_black),  class = b, coef = black) +
+    prior(normal(0, 2.5 / sd_income), class = b, coef = income)
+  
+  update(m14.11, 
+         newdata = data,
+         prior = priors,
+         cores = 4, 
+         seed = 14,
+         stanvars = stanvars,
+         ...) %>%
+    fixef(robust = T) %>% 
+    data.frame() %>% 
+    rownames_to_column("parameter")
+  
+}
+```
+
+Now fit the models with the `stan_glm()`-based weakly-informative $\beta$ priors, saving the summary results in an object called `fits2`.
+
+```{r, eval = F}
+fits2 <-
+  nes %>% 
+  nest(data = -year) %>% 
+  filter(year %in% c(1952 + 0:12 * 4)) %>% 
+  mutate(fixef = map(data, update_fit)) %>% 
+  select(-data)
+```
+
+```{r, echo = F}
+# save(fits1, file = "fits/fits_14.01.rda")
+# save(fits2, file = "fits/fits_14.02.rda")
+
+load("fits/fits_14.01.rda")
+load("fits/fits_14.02.rda")
+```
+
+Combine the two batches of parameter summaries into a single object called `fits`
+
+```{r}
+fits <-
+  bind_rows(fits1 %>% unnest(fixef) %>% mutate(prior = "flat~beta~priors"),
+            fits2 %>% unnest(fixef) %>% mutate(prior = "weak~beta~priors"))
+```
+
+We're finally ready to make Figure 14.14.
+
+```{r, fig.width = 8, fig.height = 3}
+# Intercept
+p1 <-
+  fits %>%
+  filter(parameter == "Intercept") %>%
+
+  ggplot(aes(x = year, y = Estimate, ymin = Estimate - Est.Error, ymax = Estimate + Est.Error)) +
+  ylab("Coefficient") +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_text(color = "black"),
+        strip.text.y = element_blank())
+
+# female
+p2 <-
+  fits %>%
+  filter(parameter == "female") %>%
+
+  ggplot(aes(x = year, y = Estimate, ymin = Estimate - Est.Error, ymax = Estimate + Est.Error)) +
+  ylab(NULL) +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_text(color = "black"),
+        strip.text.y = element_blank())
+
+# black
+p3 <-
+  fits %>%
+  filter(parameter == "black") %>%
+
+  ggplot(aes(x = year, y = Estimate, ymin = Estimate - Est.Error, ymax = Estimate + Est.Error,
+             color = year == 1964)) +
+  scale_color_viridis_d(option = "A", end = .55, breaks = NULL) +
+  ylab(NULL) +
+  coord_cartesian(ylim = c(-25, NA)) +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_text(color = "black"),
+        strip.text.y = element_blank())
+
+# income
+p4 <-
+  fits %>% 
+  filter(parameter == "income") %>% 
+  
+  ggplot(aes(x = year, y = Estimate, ymin = Estimate - Est.Error, ymax = Estimate + Est.Error)) +
+  ylab(NULL) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(color = "black"))
+
+# combine!
+(p1 | p2 | p3 | p4) &
+  geom_hline(yintercept = 0, linetype = 2, size = 1/4) &
+  geom_pointrange(size = 1/4, fatten = 1/2) &
+  scale_x_continuous("Year", breaks = 0:2 * 20 + 1960) &
+  facet_grid(prior ~ parameter, labeller = label_parsed) &
+  theme(axis.text = element_text(size = 7),
+        axis.title = element_text(size = 9))
+```
+
+### 14.6.1 Weakly informative default prior compared to actual prior information.
+
+> The default prior distribution used by `stan_glm` does not represent our prior knowledge about the coefficient for black in the logistic regression for 1964 or any other year.... We feel comfortable using a default model that excludes much potentially useful information, recognizing that we could add such information if it were judged to be worth the trouble (for example, instead of performing separate estimates for each election year, setting up a hierarchical model allowing the coefficients to gradually vary over time and including election-level predictors including information such as the candidates’ positions on economic and racial issues). (p. 259)
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
