@@ -2152,8 +2152,258 @@ fitted(m15.19, newdata = nd) %>%
   facet_wrap(~ male, labeller = label_both)
 ```
 
+See how the wider fuzzy interval band in the left plot is slightly wider (taller) than the one on the right? That's a consequence of the differences in $\sigma.$
 
+### 15.8.2 Mixed discrete/continuous data.
 
+I'm not aware that **brms** will allow users to fit a binomial model with something like `(earn > 0)` on the left side of the `formula`. However, one can get around that by making a binary version of the variable, first.
+      
+```{r}
+earnings <-
+  earnings %>% 
+  mutate(earn01 = ifelse(earn > 0, 1, 0))
+
+earnings %>% 
+  count(earn01)
+```
+Now fit the first part of the two-part model for `earn01` and `earn`.
+
+```{r m15.20, warning = F, message = F}
+m15.20 <-
+  brm(data = earnings,
+      family = binomial,
+      earn01 | trials(1) ~ height + male,
+      seed = 15,
+      file = "fits/m15.20")
+```
+
+```{r}
+print(m15.20, robust = T)
+```
+
+However, one can fit a model with `(earn > 0)` as the criterion using `family = categorical`.
+
+```{r m15.21, warning = F, message = F}
+m15.21 <-
+  brm(data = earnings,
+      family = categorical,
+      (earn > 0) ~ height + male,
+      seed = 15,
+      file = "fits/m15.21")
+```
+
+```{r}
+print(m15.21, robust = T)
+```
+
+Here's an easier way to compare the coefficients of the two versions of the binary model.
+
+```{r}
+fixef(m15.20, robust = T) %>% round(digits = 2)
+fixef(m15.21, robust = T) %>% round(digits = 2)
+```
+
+They're really close.
+
+We've already fit the second continuous version of this two-part model. Back in Chapter 12, we called it `m12.8`. Here it is, again.
+
+```{r m12.8, warning = F, message = F}
+m12.8 <-
+  brm(data = earnings %>% filter(earn > 0),  # subset the data
+      log(earn) ~ 1 + height + male,
+      seed = 12,
+      file = "fits/m12.08")
+```
+
+Check the parameter summary.
+
+```{r}
+print(m12.8, robust = T)
+```
+
+"Combining these gives a mixture of a spike at 0 and a lognormal distribution" (p. 284).
+
+### 15.8.3 Latent-data models.
+
+> Another way to model mixed data is through latent data, for example, positing an "underlying" income level $z_i$--the income that person $i$ would have if he or she were employed--that is observed only if $y_i > 0$. *Tobit regression* is one such model that is popular in econometrics. (p. 284, *emphasis* in the original)
+
+I'm not exactly sure if this is what Gelman et al mean by a *tobit* model, but I believe one can do this using the missing data features in **brms**. As a first step, we'll make a new version of the `earn` variable, this time with all `0` values set to `NA`. We'll call the new variable `earn_na`.
+
+```{r}
+earnings <-
+  earnings %>% 
+  mutate(earn_na = ifelse(earn > 0, earn, NA))
+
+# what is the NA breakdown?
+earnings %>% 
+  count(is.na(earn_na))
+```
+```{r m15.22, warning = F, message = F}
+m15.22 <-
+  brm(data = earnings,
+      log(earn_na) | mi() ~ 1 + height + male,
+      seed = 15,
+      file = "fits/m15.22")
+```
+
+The overall parameter summary for this model is near identical to the one for `m12.8`, above. 
+
+```{r}
+print(m15.22, robust = T)
+```
+
+What's new is the bountiful output you get from `posterior_summary()`. To keep things manageable, here we'll just look at the first 10 rows.
+
+```{r}
+posterior_summary(m15.22, robust = T)[1:10, ] %>% round(digits = 2)
+```
+
+Here, in addition to the usual parameter summaries, we also have a bunch of `Ymi[i]` parameters, where the `i` values stand for the row numbers with missing data in the criterion `earn_na`. Each missing value get a full posterior distribution, "the [log] income that person $i$ would have if he or she were employed." Here plot the posterior summaries for each of those model-based log income values, by the two predictors `male` and `height`.
+
+```{r, fig.width = 5.5, fig.height = 3}
+posterior_summary(m15.22, robust = T)[5:191, ] %>% 
+  data.frame() %>% 
+  bind_cols(earnings %>% filter(is.na(earn_na))) %>% 
+  
+  ggplot(aes(x = height, y = Estimate, ymin = Q2.5, ymax = Q97.5, 
+             color = factor(male))) +
+  geom_pointrange(alpha = 1/2, fatten = 1, size = 1/4,
+                  position = position_jitter(width = 0.25)) +
+  scale_color_manual(values = c("red4", "blue4"), breaks = NULL) +
+  ylab("log(earn)") +
+  facet_wrap(~ male, labeller = label_both)
+```
+
+### 15.8.4 Cockroaches and the zero-inflated negative binomial model.
+
+We can account for unexpectedly high numbers of zero's in a count model with zero-inflated Poisson or zero-inflated negative-binomial models. Recall the negative binomial model from Section 15.2.8, `m15.3`. Here's that summary, again.
+
+```{r}
+print(m15.3, robust = T)
+```
+
+If we set `family = zero_inflated_negbinomial`, we can fit the model
+
+$$
+\begin{align*}
+y_i & \sim \operatorname{zero inflated negative binomial}(u_i, \theta_i, \phi, z) \\
+u_i & = \log(\text{exposure2}_i) \\
+\log(\theta_i) & = \beta_0 + \beta_1 \text{roach100}_i + \beta_2 \text{treatment}_i + \beta_3 \text{senior}_i \\
+\phi & = \eta_0 \\
+z & = \zeta_0,
+\end{align*}
+$$
+
+where $u_i$ is the exposure offset, $\log(\theta_i)$ is the linear formula for the mean of the distribution, $\phi$ is the reciprocal of the overdispersion parameter, and $\operatorname{logit}(z)$ is the probability of a value greater than zero. Here we fit the model.
+
+```{r m15.23}
+m15.23 <- 
+  brm(data = roaches, 
+      family = zero_inflated_negbinomial,
+      y ~ roach100 + treatment + senior + offset(log(exposure2)), 
+      seed = 15,
+      file = "fits/m15.23")
+```
+
+Review the parameter summary.
+
+```{r}
+print(m15.23, robust = T)
+```
+
+Now we can compare `m15.3` and our new `m15.23` by way of posterior-predictive checks using the `bayesplot::ppc_dens_overlay()` method.
+
+```{r, fig.width = 7.5, fig.height = 2.75, warning = F, message = F}
+set.seed(15)
+
+y_rep_m15.3 <- posterior_predict(m15.3, nsamples = 100)
+y_rep_m15.23 <- posterior_predict(m15.23, nsamples = 100)
+
+p1 <-
+  ppc_dens_overlay(log10(roaches$y + 1), log10(y_rep_m15.3 + 1)) +
+  labs(subtitle = "negative−binomial",
+       x = "log10(y+1)") +
+  coord_cartesian(xlim = c(NA, 3.25))
+
+p2 <-
+  ppc_dens_overlay(log10(roaches$y + 1), log10(y_rep_m15.23 + 1)) +
+  labs(subtitle = "zero-inflated negative−binomial",
+       x = "log10(y+1)") +
+  coord_cartesian(xlim = c(NA, 3.25))
+
+p1 + p2 + plot_layout(guides = "collect")
+```
+
+To my eye, the models predict very similar data. Let's compare them by the LOO.
+
+```{r, warning = F, message = F}
+m15.3 <- add_criterion(m15.3, criterion = "loo")
+m15.23 <- add_criterion(m15.23, criterion = "loo")
+
+loo_compare(m15.3, m15.23) %>% print(simplify = F)
+```
+
+Each fit had one high `pareto_k` value. Here they are.
+
+```{r}
+tibble(m15.3  = m15.3$criteria$loo$diagnostics$pareto_k,
+       m15.23 = m15.23$criteria$loo$diagnostics$pareto_k) %>% 
+  mutate(row = 1:n()) %>% 
+  pivot_longer(-row, 
+               names_to = "fit",
+               values_to = "pareto_k") %>% 
+  filter(pareto_k > 0.7)
+```
+
+Neither model fully accounted for one oddball case.
+
+### 15.8.5 Prediction and Bayesian inference.
+
+We can generally do this with `posterior_predict()`.
+
+```{r}
+new <- 
+  tibble(height = 68, 
+         male   = 0)
+
+set.seed(15)
+
+pred_m15.20 <- posterior_predict(m15.20, newdata = new) 
+pred_m12.8 <- posterior_predict(m12.8, newdata = new) 
+
+pred <- 
+  ifelse(pred_m15.20 == 1, exp(pred_m12.8), 0)
+
+# what have we done?
+str(pred)
+```
+
+Let's compare these values with the original data.
+
+```{r, fig.width = 7.5, fig.height = 2.75, warning = F, message = F}
+p1 <-
+  tibble(earn = pred) %>% 
+  ggplot(aes(x = earn, fill = earn == 0)) + 
+  geom_histogram(binwidth = 5e3) +
+  scale_fill_viridis_d(option = "B", end = .5) +
+  coord_cartesian(xlim = c(0, 2e5)) +
+  labs(subtitle = "model-implied")
+
+p2 <-
+  earnings %>% 
+  filter(male == 0 & height == 68) %>% 
+  
+  ggplot(aes(x = earn, fill = earn == 0)) +
+  geom_histogram(binwidth = 5e3) +
+  scale_fill_viridis_d(option = "B", end = .5) +
+  coord_cartesian(xlim = c(0, 2e5)) +
+  labs(subtitle = "original data")
+
+# combine
+p2 + p1 + 
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "Earnings distribution for women 68 inches tall")
+```
 
 ## Session info {-}
 
