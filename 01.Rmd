@@ -523,6 +523,60 @@ fitted(m1.4,
 
 Not sure where these estimates came from. Keep an eye out for this in later chapters.
 
+The example in this section comes from the `earnings.csv` data, which we won't see formally introduced until [Section 5.4](https://github.com/ASKurz/Working-through-Regression-and-other-stories/blob/main/05.md#54-bootstrapping-to-simulate-a-sampling-distribution). Load the data.
+
+```{r, message = F}
+earnings <- read_csv("ROS-Examples-master/Earnings/data/earnings.csv")
+
+head(earnings)
+```
+
+The model requires we make a new version of the `height` variable centered on 60. We'll call it `height_60`.
+
+```{r}
+earnings <-
+  earnings %>% 
+  mutate(height_60 = height - 60)
+```
+
+Here's how to fit the model described in the text.
+
+```{r m1.5}
+m1.5 <-
+  brm(data = earnings,
+      family = gaussian,
+      earn ~ 1 + height_60,
+      cores = 4, chains = 4,
+      seed = 1,
+      file = "fits/m01.05")
+```
+
+Check the model summary.
+
+```{r}
+print(m1.5, robust = T)
+```
+
+Now we can see where the authors got the model formula `earnings = 11 000 + 1500 ∗ (height − 60) + error` (p. 12). Those are the same as our intercept and $\beta$ coefficients, when rounded. When they wrote "the errors are mostly in the range ±22 000," those values are a rounded version of the point estimate in our `sigma` row. Our "errors" can be described as normally distributed with a mean of zero and a standard deviation of about 22,000. Here's what that looks like, accounting for posterior uncertainty.
+
+```{r, fig.width = 4.5, fig.height = 3.25}
+posterior_samples(m1.5) %>% 
+  slice_sample(n = 50) %>% 
+  mutate(iter = 1:n()) %>% 
+  expand(nesting(iter, sigma), 
+         earn = seq(from = -70000, to = 70000, length.out = 200)) %>% 
+  mutate(d = dnorm(earn, mean = 0, sd = sigma)) %>% 
+  
+  ggplot(aes(x = earn, y = d, group = iter)) +
+  geom_line(size = 1/4, alpha = 1/2) +
+  scale_y_continuous(NULL, breaks = NULL, 
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  labs(subtitle = expression(50~posterior~draws~of~about~Normal(0*', '*22000))) +
+  coord_cartesian(xlim = c(-6e4, 6e4))
+```
+
+We'll get a better sense of what this all means in later chapters.
+
 ### 1.4.4 Building, interpreting, and checking regression models.
 
 The authors proposed the statistical model workflow has four basic steps:
