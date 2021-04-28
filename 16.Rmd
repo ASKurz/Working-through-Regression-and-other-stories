@@ -416,18 +416,1233 @@ If you have an expected difference in proportion of $10 \%$ for groups you antic
 
 ## 16.3 Sample size and design calculations for continuous outcomes
 
+"Sample size calculations proceed much the same way with continuous outcomes, with the added difficulty that the population standard deviation must also be specified along with the hypothesized effect size" (p. 297).
 
+### 16.3.1 Estimates of means.
 
+> Suppose we are trying to estimate a population mean value $\theta$ from data $y_1, \dots, y_n$, an random sample of size $n$. The quick estimate of $\theta$ is the sample mean, $\bar y$, which has a standard error of $\sigma / \sqrt{n}$, where $\sigma$ is the standard deviation of $y$ in the population. So if the goal is to achieve a specified s.e. for $\bar y$, then the sample size must be at least $n = (\sigma/ \text{s.e.})^2$. If the goal is 80% power to distinguish $\theta$ from a specified value $\theta_0$, then a conservative required sample is $n = (2.8 \sigma/ (\theta - \theta_0))^2$. (p. 297)
 
+We might walk that out, a bit. Say we have data $y_i \sim \operatorname{Normal}(0, 1)$ and our parameter of interest, $\theta$, is the mean. Let's further suppose we'd like to estimate $\theta$ with a standard error of 0.1 or below. The equation $n = (\sigma/ \text{s.e.})^2$ will tell us how many cases we need.
 
+```{r}
+# population parameters
+mu    <- 0
+sigma <- 1
 
+# desired se
+se <- 0.1
 
+# required n
+(sigma / se)^2
+```
 
+Let's simulate some data and see how this shakes out.
 
+```{r}
+# how many would you like?
+n <- 100
 
+# simulate!
+set.seed(16)
 
+d <- tibble(y = rnorm(n, mean = mu, sd = sigma))
+```
 
+Now see how well this works out by fitting an intercept-only model to the data. The intercept will be $\theta$. Here we'll use **brms** with default weakly-regularizing priors. 
 
+```{r m16.1, warning = F, message = F}
+library(brms)
+
+m16.1 <- 
+  brm(data = d, 
+      family = gaussian,
+      y ~ 1, 
+      seed = 16,
+      file = "fits/m16.01")
+```
+
+Check the results.
+
+```{r}
+print(m16.1, robust = T, digits = 3)
+```
+
+The 'Est.Error' column for the intercept parameter is our Bayesian equivalent of a standard error. It looks like were were just under our desired $\text{s.e. = 0.1}$. Now let's explore the second equation, $n = (2.8 \sigma/ (\theta - \theta_0))^2$, which defined the necessary sample size to differentiate $\theta$ from some value $\theta_0$. We'll continue to use $y_i \sim \operatorname{Normal}(0, 1)$ data for which $\mu = \theta$. Our comparison point might be $\theta_0 = 0.2$. Here's the minimum sample size.
+
+```{r}
+theta0 <- 0.25
+
+(2.8 * sigma / (mu - theta0))^2
+```
+
+Now let's simulate based on $N = 126$.
+
+```{r}
+# how many would you like?
+n <- 126
+
+# simulate!
+set.seed(16)
+
+d <- tibble(y = rnorm(n, mean = mu, sd = sigma))
+```
+
+Fit another intercept-only model.
+
+```{r m16.2}
+m16.2 <- 
+  brm(data = d, 
+      family = gaussian,
+      y ~ 1, 
+      seed = 16,
+      file = "fits/m16.02")
+```
+
+These results might be easiest to examine in a couple plots.
+
+```{r, fig.width = 6.5, fig.height = 2.75, warning = F, message = F}
+library(tidybayes)
+
+p1 <-
+  posterior_samples(m16.2) %>% 
+  
+  ggplot(aes(x = b_Intercept, y = 0)) +
+  stat_halfeye(.width = .95) +
+  geom_vline(xintercept = theta0, linetype = 2) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(theta))
+
+p2 <-
+  posterior_samples(m16.2) %>% 
+  transmute(diff = b_Intercept - theta0) %>% 
+  
+  ggplot(aes(x = diff, y = 0)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(theta-theta[0]))
+
+p1 + p2
+```
+
+It looks like our $N = 126$ was indeed just large enough to differentiate our $\theta$ from $\theta_0$.
+
+### 16.3.2 The $t$ distribution and uncertainty in standard deviations.
+
+To see where the 2.8 number from above, came from, execute the following.
+
+```{r}
+qnorm(0.8) + qnorm(0.975)
+```
+
+Both `qrnorm()` functions presumed `mean = 0` and `sd = 1`. They used the standard normal. When the sample size is very small, it might be better to presume the standard $t$ distribution for which $\nu$ is the degrees of freedom for the statistical procedure. If you would like to compare the mean of some variable between two groups, each of which is composed of $n = 6$ people, you'd have 10 degrees of freedom--you lost one degree of freedom for each group's mean. Thus, the error distribution for this issue might be $t(10, 0, 1)$. Here's the multiplier in that case.
+
+```{r}
+qt(0.8, df = 10) + qt(0.975, df = 10)
+```
+
+### 16.3.3 Simple comparisons of means.
+
+> The standard error of $\bar y_1 - \bar y_2$ is $\sqrt{\sigma_1^2 / n_1 + \sigma_2^2 / n_2}$. If we make the restriction $n_1 = n_2 = n / 2$ (equal sample sizes in the two groups), the standard error becomes simply $\text{s.e.} = \sqrt{2(\sigma_1^2 + \sigma_2^2) / n}$. A specified standard error can then be attained with a sample size of $n = 2(\sigma_1^2 + \sigma_2^2) / (\text{s.e.})^2$. If we further suppose that the variation is the same within each of the groups $(\sigma_1 = \sigma_2 = \sigma)$, then $\text{s.e.} = 2\sigma / \sqrt{n}$, and the required sample size is $n = (2\sigma / \text{s.e.})^2$.
+>
+> If the goal is 80% power to detect a difference of $\Delta$, with a study of size $n$, equally divided between the two groups, then the required sample size is $n = 2(\sigma_1^2 + \sigma_2^2)(2.8 / \Delta)^2$. If $\sigma_1 = \sigma_2 = \sigma$, this simplifies to $(5.6 \sigma / \Delta)^2$. (pp. 297--298)
+
+Consider the case where $\Delta = 0.5 \sigma$, where you have an expected experimental change in 0.5 standard scores. If you had two groups of equal size and you expect homogeneity of variance, here's the required total $N$.
+
+```{r}
+sigma <- 1
+delta <- 0.5
+
+(5.6 * sigma / delta)^2
+```
+
+You'd need at least $N = 126$, or $n = 63$ per condition. But where did that 5.6 come from, again?
+
+```{r}
+(qnorm(0.8) + qnorm(0.975)) * 2
+```
+
+### 16.3.4 Estimating standard deviations using results from previous studies.
+
+Here's the information from the Rosado et al (1997) study from Figure 16.4.
+
+```{r}
+library(tidyverse)
+
+rosado <-
+  tibble(treatment = c("placebo", "iron", "zinc", "zinc + iron"),
+         n         = c(56, 54, 54, 55),
+         mu        = c(1.1, 1.4, 0.7, 0.8),
+         se        = c(0.2, 0.2, 0.1, 0.1))
+
+rosado %>% 
+  flextable::flextable() %>% 
+  flextable::width(width = 1)
+```
+
+It you collapse across iron status, treatment is the composite of zinc and zinc + iron and control is the composite placebo + iron. Here, then, is how to compute $\Delta$.
+
+```{r}
+m1 <- rosado[1, 3] %>% pull()
+m2 <- rosado[2, 3] %>% pull()
+m3 <- rosado[3, 3] %>% pull()
+m4 <- rosado[4, 3] %>% pull()
+
+(rosado_delta <- 0.5 * (m1 + m2) - 0.5 * (m3 + m4))
+```
+
+Here's the $\text{s.e.}$.
+
+```{r}
+se1 <- rosado[1, 4] %>% pull()
+se2 <- rosado[2, 4] %>% pull()
+se3 <- rosado[3, 4] %>% pull()
+se4 <- rosado[4, 4] %>% pull()
+
+(se <- sqrt(0.25 * (se1^2 + se2^2) + 0.25 * (se3^2 + se4^2)))
+```
+
+Thus, if you think in terms of $\Delta \pm \text{s.e.}$, here's the expected range of the effect size in the population.
+
+```{r}
+c(rosado_delta - se, rosado_delta + se)
+```
+
+Now we compute the within-group standard deviations using $\sigma = \text{s.e.} \times \sqrt n$.
+
+```{r}
+n1 <- rosado[1, 2] %>% pull()
+n2 <- rosado[2, 2] %>% pull()
+n3 <- rosado[3, 2] %>% pull()
+n4 <- rosado[4, 2] %>% pull()
+
+(s1 <- se1 * sqrt(n1))
+(s2 <- se2 * sqrt(n2))
+(s3 <- se3 * sqrt(n3))
+(s4 <- se4 * sqrt(n4))
+```
+
+It might be helpful to compute the pooled standard deviations for the control and treatment composites.
+
+```{r}
+(s_pooled_c <- sqrt(((n1 - 1) * s1^2 + (n2 - 1) * s2^2) / (n1 + n2 - 2)))
+(s_pooled_t <- sqrt(((n3 - 1) * s3^2 + (n4 - 1) * s4^2) / (n3 + n4 - 2)))
+```
+
+Now recall that $\sqrt{a / b} = \sqrt a / \sqrt b$. We can then compute the expected standard error of the difference, given $n$, as
+
+$$
+\begin{align*}
+\text{s.e.} & = \sqrt{2 (\sigma_1^2 + \sigma_2^2) / n} \\
+& = \sqrt{2 (\sigma_1^2 + \sigma_2^2)} / \sqrt n.
+\end{align*}
+$$
+
+Here's equal group sizes, here's $\sqrt{2 (\sigma_1^2 + \sigma_2^2)}$.
+
+```{r}
+sqrt(2 * (s_pooled_c^2 + s_pooled_t^2))
+```
+
+Thus, here's our minimum sample size to compare two groups.
+
+```{r}
+(2.8 * sqrt(2 * (s_pooled_c^2 + s_pooled_t^2)) / rosado_delta)^2
+```
+
+Our $N$ differs from the 180 in the text due to rounding differences. Also, though we don't need it here, it'll come in handy in the next section if we save the average observed rate of the composite control group.
+
+```{r}
+(mu_c_rosado <- (m1 * n1 + m2 * n2) / (n1 + n2))
+```
+
+OKay, now here's the information from the Ruel et al (1997) study from Figure 16.4.
+
+```{r}
+ruel <-
+  tibble(treatment = c("placebo", "zinc"),
+         n         = c(44, 45),
+         mu        = c(8.1, 6.3),
+         ll        = c(5.8, 4.2),
+         ul        = c(10.2, 8.9))
+
+ruel %>% 
+  flextable::flextable() %>% 
+  flextable::width(width = 0.8)
+```
+
+Here's how we might compute the standard errors from the 95% CI values.
+
+```{r}
+ruel <-
+  ruel %>% 
+  mutate(se = (ul - ll) / (2 * 1.96))
+
+ruel
+```
+Here we compute $\Delta$.
+
+```{r}
+m1 <- ruel[1, 3] %>% pull()
+m2 <- ruel[2, 3] %>% pull()
+
+(ruel_delta <- m1 - m2)
+```
+
+By  $\sqrt{\sigma_1^2 / n_1 + \sigma_2^2 / n_2}$, compute the standard error for $\Delta$.
+
+```{r}
+# sample sizes
+n1 <- ruel[1, 2] %>% pull()
+n2 <- ruel[2, 2] %>% pull()
+
+# standard errors
+se1 <- ruel[1, "se"] %>% pull()
+se2 <- ruel[2, "se"] %>% pull()
+
+# sigma's
+s1 <- se1 * sqrt(n1)
+s2 <- se2 * sqrt(n2)
+
+# the se for the difference
+(se_delta <- sqrt(s1^2 / n1 + s2^2 / n2))
+```
+
+> When compared to the average observed rate in the control group, the estimated treatment effect from this study [Ruel et al, 1997] is about half that of the Rosado et al. (1997) experiment: 1.8/8.1 = 0.22, compared to 0.5/1.15 = 0.43, which suggests a higher sample size might be required. (p. 299)
+
+Here are those ratios.
+
+```{r}
+ruel_delta / m1
+
+rosado_delta / mu_c_rosado
+```
+
+I'm pretty sure the value for `mu_c_rosado` reported in the text, and thus the value of the ratio resulting from that value, is wrong. I've opened up a [GitHub issue](https://github.com/avehtari/ROS-Examples/issues/82) for the claim. We'll see. 
+
+Now consider Lira et al. (1998). 
+
+```{r}
+lira <-
+  tibble(treatment = c("placebo", "1 mg zinc", "5 mg zinc"),
+         n         = c(66, 68, 71),
+         diarrhea  = c(5, 5, 3),
+         p_ratio   = c(1, 1, 0.68),
+         ll        = c(1, 0.72, 0.49),
+         ul        = c(1, 1.40, 0.95))
+
+lira %>% 
+  flextable::flextable() %>% 
+  flextable::width(width = 0.8)
+```
+
+Here we compute the log of the 95% CIs, use those values to compute the standard error of the treatment effect, and compute the log of the p-ratio.
+
+```{r}
+lira <-
+  lira %>% 
+  mutate(log_ll = log(ll),
+         log_ul = log(ul)) %>% 
+  mutate(se = (log_ul - log_ll) / (2 * 1.96),
+         log_p_ratio = log(p_ratio))
+
+lira
+```
+
+```{r}
+# the effect size for 5 mg zinc
+(m1 <- lira[3, "log_p_ratio"] %>% pull())
+
+# the se for 5 mg zinc
+(se1 <- lira[3, "se"] %>% pull())
+
+# how many standard errors away form zero is the effect size?
+abs(m1 / se1)
+```
+
+For 80% power, we want the effect to be $2.8 \sigma$ away from zero. Here's the factor we'd want to increase our $N$.
+
+```{r}
+(2.8 / abs(m1 / se1))^2
+```
+
+That'd give us $N = 107$.
+
+```{r}
+1.5 * lira[3, "n"] %>% pull()
+```
+
+"Finally, Muller et al. (2001) compare the proportion of days with diarrhea" (p. 299). Here are those data.
+
+```{r}
+muller <-
+  tibble(treatment = c("placebo", "zinc"),
+         n         = c(329, 332),
+         diarrhea  = c(997, 869),
+         total     = c(49021, 49086)) %>% 
+  mutate(ratio = diarrhea / total)
+
+muller %>% 
+  flextable::flextable() %>% 
+  flextable::width(width = 0.8)
+```
+
+Thus, we have about a 13% decrease in diarrhea in treatment, relative to control.
+
+```{r}
+m1 <- muller[1, "ratio"] %>% pull()
+m2 <- muller[2, "ratio"] %>% pull()
+
+1 - m2 / m1
+```
+
+There isn't enough information in the `muller` to compute the standard error.
+
+### 16.3.5 Including more regression predictors.
+
+Consider a case where we include covariates. 
+
+> Sample size calculations for this new study are exactly as before, except that the within-group standard deviation $\sigma$ is replaced by the residual standard deviation of the regression. This can be hypothesized in its own right or in terms of the added predictive power of the pre-treatment data. For example, if we hypothesize a within-group standard deviation of 0.2, then a residual standard deviation of 0.14 would imply that half the variance within any group is explained by the regression model, which would actually be pretty good.
+>
+> Adding relevant predictors should decrease the residual standard deviation and thus reduce the required sample size for any specified level of precision or power. (pp. 299--300)
+
+It might be helpful to walk out the computation with the two standard deviations.
+
+```{r}
+tibble(example     = c("no covariate", "covariate"),
+       residual_sd = c(.2, .14)) %>% 
+  mutate(residual_variance = residual_sd^2)
+```
+
+Thus, the addition of a covariate would eat up about half of the residual variance, increasing power.
+
+### 16.3.6 Estimation of regression coefficients more generally.
+
+> More generally, sample sizes for regression coefficients and other estimands can be calculated using the rule that standard errors are proportional to $1 / \sqrt n$; thus, if inferences exist under a current sample size, effect sizes can be estimated and standard errors extrapolated for other hypothetical samples. (p. 300)
+
+Here's what that looks like.
+
+```{r, fig.width = 4, fig.height = 2.75}
+tibble(n = 10:1000) %>% 
+  mutate(se = 1 / sqrt(n)) %>% 
+  
+  ggplot(aes(x = n, y = se)) +
+  geom_line() +
+  scale_x_continuous(expression(italic(n)), 
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  scale_y_continuous("standard error", 
+                     expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) 
+```
+
+Next, we read:
+
+> We illustrate with the example of the survey earnings and height discussed in Chapter 4. The coefficient for the sex-earnings interaction in model (12.2) is plausible (a positive interaction, implying that an extra inch of height is worth 0.7% more for men than for women), but it is not statistically significant—the standard error is 1.9%, yielding a 95% interval of [−3.1, 4.5], which contains zero. (p. 300)
+
+As far as I can tell, this paragraph is completely misleading and I have reported as much in a [GitHub issue](https://github.com/avehtari/ROS-Examples/issues/83). The only interaction model that seems plausible, here, is what we called `m12.9`, from back in [Section 12.4.3.4](https://github.com/ASKurz/Working-through-Regression-and-other-stories/blob/main/12.md#12434-including-an-interaction) (p. 193). Here's the model.
+
+```{r m12.9_16, warning = F, message = F}
+m12.9 <-
+  brm(data = earnings %>% filter(earn > 0),  # subset the data
+      log(earn) ~ 1 + height + male + height:male,
+      seed = 12,
+      file = "fits/m12.09")
+```
+
+Summarize the parameters.
+
+```{r}
+print(m12.9, robust = T, digits = 3)
+```
+
+I have no idea what the authors meant when they wrote: "The coefficient for the sex-earnings interaction in model (12.2)." That value does not resemble any of the point estimates or standard errors, here. I'm also unclear how they came up with the interpretation "a positive interaction, implying that an extra inch of height is worth 0.7% more for men than for women." We can, at least, propose that their claim the standard error for the interaction was 19% by multiplying our standard error by 100, which yields 15%. That value is plausible after accounting for simulation error and so on. However, the lower level of the 95% interval is way off from our value.
+
+These discrepancies, which bleed into the next paragraph in the text, make it difficulty to follow along with the examples.
+
+### 16.3.6 Sample size, design, and interactions.
+
+> Sample size is never large enough. As $n$ increases, we can estimate more interactions, which typically are smaller and have relatively larger standard errors than main effects; for example, see the fitted regression on page 193 of log earnings on sex, standardized height, and their interaction. Estimating interactions is similar to comparing coefficients estimated from subsets of the data (for example, the coefficient for height among men, compared to the coefficient among women), thus reducing power because the sample size for each subset is halved, and also the differences themselves may be small (pp. 300--301)
+
+We called the model under discussion `m12.10`. Here it is, again.
+
+```{r, m12.10_16}
+m12.10 <-
+  brm(data = earnings %>% filter(earn > 0),  # subset the data
+      log(earn) ~ 1 + z_height + male + z_height:male,
+      seed = 12,
+      file = "fits/m12.10")
+```
+
+```{r}
+print(m12.10, robust = T)
+```
+
+The standard error for the interaction is almost as large as its posterior median.
+
+## 16.4 Interactions are harder to estimate than main effects
+
+"In causal inference, it is often important to study varying effects" (p. 301).
+
+### 16.4.1 You need 4 times the sample size to estimate an interaction that is the same size as the main effect.
+
+> Suppose a study is designed to have 80% power to detect a main effect at a 95% confidence level. As discussed earlier in this chapter, that implies that the true effect size is 2.8 standard errors from zero. That is, the $z$-score has a mean of 2.8 and standard deviation of 1, and there's an 80% chance that the $z$-score exceeds 1.96 (in R, `pnorm(2.8,1.96,1)` = 0.8). (p. 301)
+
+Let's execute that code.
+
+```{r}
+pnorm(2.8, mean = 1.96, sd = 1)
+```
+
+The value 2.8, again, comes from Section 16.2.5, where we learned $2.8 = 1.96 + 0.84$ and in standard normal distribution, $z = -0.84$ is the threshold dividing the lower $20 \%$ from the upper $80 \%$ of the distribution. 
+
+> Further suppose that an interaction of interest is the same size as the main effect. For example, if the average treatment effect on the entire population is $\theta$, with an effect of 0.5 $\theta$ among women and 1.5 $\theta$ among men, then the interaction--the difference in treatment effect comparing men to women--is the same size as the main effect. (p. 301)
+
+To work that out a little more, here's how that exmaple shows an interaction of the same size of the main effect.
+
+```{r}
+theta_m <- 1.5
+theta_w <- 0.5
+
+# main effect
+(theta_m + theta_w) / 2
+
+# interaction
+theta_m - theta_w
+```
+
+In this case, "the standard error of an interaction is roughly twice the standard error of the main effect" (p. 301). Presuming equal sample sizes and variances, this is because the overall effect $\bar y_T - \bar y_C$ has a standard error of
+
+$$
+\begin{align*}
+\text{s.e.}_{\bar y_T - \bar y_C} & = \sqrt{\sigma^2 / (n / 2) + \sigma^2 / (n / 2)} \\
+& = 2 \sigma / \sqrt n.
+\end{align*}
+$$
+
+The estimate for the interaction between men and women, $(\bar y_{T, \text{men}} - \bar y_{C, \text{men}}) - (\bar y_{T, \text{women}} - \bar y_{C, \text{women}})$, has a standard error of 
+
+$$
+\begin{align*}
+\text{s.e.}_{(\bar y_{T, \text{men}} - \bar y_{C, \text{men}}) - (\bar y_{T, \text{women}} - \bar y_{C, \text{women}})} & = \sqrt{\sigma^2 / (n / 4) + \sigma^2 / (n / 4) + \sigma^2 / (n / 4) + \sigma^2 / (n / 4)} \\
+& = 4 \sigma / \sqrt n,
+\end{align*}
+$$
+
+presuming the residual standard deviation, $\sigma$ (or $\sigma_\epsilon$), is the same in both scenarios, which also presumes negligible $\Delta R^2$ between the two models. To make this all concrete, we might simulate an example. First we'll make a couple functions based on the formulas for $\text{s.e.}_{\bar y_T - \bar y_C}$ and $\text{s.e.}_{(\bar y_{T, \text{men}} - \bar y_{C, \text{men}}) - (\bar y_{T, \text{women}} - \bar y_{C, \text{women}})}$.
+
+```{r}
+se_main <- function(n, sigma = 1) {
+  sqrt(sigma^2 / (n / 2) + sigma^2 / (n / 2))
+}
+
+se_interaction <- function(n, sigma = 1) {
+  sqrt(sigma^2 / (n / 4) + sigma^2 / (n / 4) + sigma^2 / (n / 4) + sigma^2 / (n / 4))
+}
+```
+
+Now use those functions to compute the two kinds of standard errors for $n = 10$ through $n = 200$. Then plot.
+
+```{r, fig.width = 3.5, fig.height = 2.5}
+d <-
+  tibble(n = 10:200) %>% 
+  mutate(se_main        = se_main(n),
+         se_interaction = se_interaction(n))
+
+d %>% 
+  ggplot(aes(x = n)) +
+  geom_line(aes(y = se_main)) +
+  geom_line(aes(y = se_interaction), 
+            linetype = 2) +
+  scale_y_continuous("s.e.", expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+  xlab(expression(italic(n)))
+```
+
+In the plot, the dashed line is for the standard error for the interaction. The plot shows that holding $n$ constant, $\text{s.e.}_{(\bar y_{T, \text{men}} - \bar y_{C, \text{men}}) - (\bar y_{T, \text{women}} - \bar y_{C, \text{women}})}$ is always twice the size of $\text{s.e.}_{\bar y_T - \bar y_C}$. If we want a target standard error of 0.5, here are the minimum sample sizes, by the kind of standard error.
+
+```{r}
+target_se <- 0.5
+
+d %>% 
+  filter(se_main <= target_se) %>% 
+  slice(1)
+
+d %>% 
+  filter(se_interaction <= target_se) %>% 
+  slice(1)
+```
+
+What's the ratio?
+
+```{r}
+64 / 16
+```
+
+Yep, we need about four times the $n$ when computing an interaction.
+
+> What is the power of the estimate of the interaction, as estimated from the original experiment of size $n$? The probability of seeing a difference that is "statistically significant" at the 5% level is the probability that the $z$-score exceeds 1.96; that is, `pnorm(1.4,1.96,1)` = 0.29. (p. 301)
+
+Work that through.
+
+```{r}
+pnorm(1.4, mean = 1.96, sd = 1)
+```
+
+> And, if you do perform the analysis and report it if the 95% interval excludes zero, you will overestimate the size of the interaction by a lot, as we can see by simulating a million runs of the experiment. (p. 301)
+
+Here's a **tidyverse** version of the siumulation.
+
+```{r}
+# how many would you like?
+n <- 1e6
+
+# simulate
+set.seed(16)
+
+tibble(raw = rnorm(n, mean = 1.4, sd = 1)) %>% 
+  mutate(significant = raw > 1.96 ) %>% 
+  # condition on whether z > 1.96
+  filter(significant == TRUE) %>% 
+  # now compute the average of the esitmate
+  summarise(mean_of_the_significant_iterations = mean(raw))
+```
+
+This is about twice the size as the original `mean = 1.4`.
+
+### 16.4.2 You need 16 times the sample size to estimate an interaction that is half the size as the main effect.
+
+> The message we take from this analysis is *not* that interactions are too difficult to estimate and should be ignored. Rather, interactions can be important; we just need to accept that in many settings we won’t be able to attain anything like near-certainty regarding the magnitude or even direction of particular interactions. It is typically not appropriate to aim for "statistical significance" or 95% intervals that exclude zero, and it often will be appropriate to use prior information to get more stable and reasonable estimates, and to accept uncertainty, not acting as if interactions of interest are zero just because their estimate is not statistically significant. (p. 302, *emphasis* in the original)
+
+### 16.4.3 Understanding the problem by simulating regressions in R.
+
+Let's simulate our first batch of `fake` data.
+
+```{r}
+# how many would you like?
+n <- 1000
+
+# set population scale
+sigma <- 10
+
+set.seed(16)
+
+fake <-
+  tibble(y  = rnorm(n, mean = 0, sd = sigma),
+         x1 = sample(c(-0.5, 0.5), size = n, replace = TRUE),
+         x2 = sample(c(-0.5, 0.5), size = n, replace = TRUE))
+
+# what did we do?
+head(fake)
+```
+
+Fit a univariable model with only `x1` and then a bivariable interaction model with both `x1` and `x2`.
+
+```{r m16.3, warning = F, message = F}
+m16.3 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ x1, 
+      seed = 16,
+      file = "fits/m16.03")
+
+m16.4 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ x1 + x2 + x1:x2, 
+      seed = 16,
+      file = "fits/m16.04")
+```
+
+Check the model results.
+
+```{r}
+print(m16.3, robust = T)
+print(m16.4, robust = T)
+```
+
+Our numbers won't match up exactly with those in the text because Gelman et all did not report a seed value and the number of cases in the simulation isn't large enough to expect asymptotic results. Gelman et al encouraged us to focus on the standard errors, rather than the posterior medians. If we follow the formula $2 \sigma / \sqrt n$, we can compute the expected standard errors for the first order parameters. Here we do so in **R** using the population values.
+
+```{r}
+2 * sigma / sqrt(n)
+```
+
+This is very close to the standard error values for `x1` and `x2` in our parameter summaries. Now, if we follow the formula $4 \sigma / \sqrt n$ for the interaction, we can compute the expected standard error for the interaction in model `m16.4`. 
+
+```{r}
+4 * sigma / sqrt(n)
+```
+
+Yep, that's very close to the standard error for our `x1:x2` term.
+
+Now simulate our second batch of `fake` data. This time, the two predictor variables will take on values `0` and `1`.
+
+```{r}
+set.seed(16)
+
+fake <-
+  tibble(y  = rnorm(n, mean = 0, sd = sigma),
+         x1 = sample(0:1, size = n, replace = TRUE),
+         x2 = sample(0:1, size = n, replace = TRUE))
+
+# what did we do?
+head(fake)
+```
+
+Fit another two models.
+
+```{r m16.5, warning = F, message = F}
+m16.5 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ x1, 
+      seed = 16,
+      file = "fits/m16.05")
+
+m16.6 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ x1 + x2 + x1:x2, 
+      seed = 16,
+      file = "fits/m16.06")
+```
+
+Check the results for the new models.
+
+```{r}
+print(m16.5, robust = T)
+print(m16.6, robust = T)
+```
+
+Though the standard errors are as expected for the sole predictor in `m16.5` and for the interaction in `m16.6`, they aren't what we might have initially expected for the two lower-order terms in `m16.6`. Those are now hovering around 0.9.
+
+> What happened was that the main effects are now estimated at the edge of the data: the estimated coefficient of $x_1$ is now the difference in $y$, comparing the two values of $x_1$ , just at $x_2 = 0$. So its standard error is $\sqrt{\sigma^2 / (n/4) + \sigma^2 / (n/4)} = 2 \sqrt 2 \sigma / \sqrt n$. Under this parameterization, the coefficient of $x_1$ is estimated just from the half of the data for which $x_2 = 0$, so the standard error is $\sqrt 2$ big as before. Similarly for $x_2$. (p. 303)
+
+Here's how to work that through using our population values.
+
+```{r}
+sqrt(sigma^2 / (n / 4) + sigma^2 / (n / 4))
+```
+
+And indeed, that value is very close to the standard errors for our lower-order coefficients in `m16.6`. Importantly,
+
+> these aren't really "main effects"; in the context of the above problem, the main effect of the treatment is the average over men and women. If we put the problem in a regression framework, we should be coding the predictors not as 0, 1 but as −0.5, 0.5, so that the main effect for each predictor corresponds to the other predictor set to its average level. (p. 303)
+
+Now consider what happens when we reset the predictors to take on values of -1 and 1.
+
+```{r m16.7, warning = F, message = F}
+# simulate the data
+set.seed(16)
+
+fake <-
+  tibble(y  = rnorm(n, mean = 0, sd = sigma),
+         x1 = sample(c(-1, 1), size = n, replace = TRUE),
+         x2 = sample(c(-1, 1), size = n, replace = TRUE))
+
+# fit the models
+m16.7 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ x1, 
+      seed = 16,
+      file = "fits/m16.07")
+
+m16.8 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ x1 + x2 + x1:x2, 
+      seed = 16,
+      file = "fits/m16.08")
+```
+
+Check the results for these models.
+
+```{r}
+print(m16.7, robust = T)
+print(m16.8, robust = T)
+```
+
+Now the standard errors for all of the $\beta$ coefficients are much smaller than before--all are around 0.3.
+
+> The factor of 2 for the main effect is clear enough: If you multiply $x$ by 2, and $\beta ∗ x$ doesn't change, then you have to divide $\beta$ by 2 to compensate, and its standard error gets divided by 2 as well. But what happened to the interaction? That's clear too: we've multiplied $x_1$ and $x_2$ each by 2, so $x_1 x_2$ is multiplied by 4. (p. 304)
+
+I gotta be honest. This doesn't make sense, to me, at all. If you understand where the authors are getting the notion of multiplying $x$ by 2, and so on, feel free to [share your insights on GitHub](https://github.com/ASKurz/Working-through-Regression-and-other-stories/issues).
+
+## 16.5 Design calculations after the data have been collected
+
+Load the `sexratio.rda` data.
+
+```{r}
+load("ROS-Examples-master/SexRatio/data/sexratio.rda")
+
+# what is this?
+sexratio
+```
+
+We read: 
+
+> For our discussion here we shall work with the simple analysis from Section 9.4, comparing the “very attractive” parents in the survey (56% of their children were girls) to the other parents (only 44% of their children were girls). The difference was 8% with a standard error of 3%. (p. 304)
+
+I'm pretty sure there's a typo and the second percentage should be 48%, which I worked through in [GitHub issue #85](https://github.com/avehtari/ROS-Examples/issues/85). Here's the quick proof:
+
+```{r}
+56 - 8
+```
+
+Here's the slightly slower proof:
+
+```{r}
+sexratio %>% 
+  filter(x < 2) %>% 
+  summarise(mean = mean(y))
+```
+
+If we use `2` rather than the more precise `1.96`, here's how we might compute the classical 95% confidence intervals around the difference.
+
+```{r}
+8 + c(-2, 2) * 3
+```
+
+Thus, the classical difference is $8\%, 95\% \text{CI}\ [2\%, 14\%]$, which, now that I write that all out, contains a ridiculous number of percentage signs. 
+
+Anyway, with a standard error of 3, a study of this size and design would require an absolute difference of at least 6 to pass through the typical statistical-significance-publishing filter. Gelman et al proposed the prior literature suggests we should expect differences in the $[-0.5, 0.5]$ range.
+
+If the true difference is 0, we should expect a $p$-value-based error rate of 1/20. That is, when you use the conventional $\alpha = .05$, you'll get statistically-significant $p$-values about 5 times in 100. 
+
+Now consider when true difference is 0.2 and we're still powered for a standard error of 3. Here is "the probability of the estimate being at least 6% (two standard errors away from zero, thus 'statistically significant')" (p. 305).
+
+```{r}
+p_positive <- 1 - pnorm(6, mean = 0.2, sd = 3)
+p_positive
+```
+
+Notice that was for a positive difference. Here's the probability of a *negative* difference of 6 percentage points.
+
+```{r}
+p_negative <- pnorm(-6, mean = 0.2, sd = 3)
+p_negative
+```
+
+We can compute the type S error rate (the rate we'd expect to get a statistically-significant result in the wrong direction) with the following ratio.
+
+```{r}
+p_negative / (p_negative + p_positive)
+```
+
+Using the statistical-significance filter, the observed power of the study, and the presumption of a true difference of 0.5, we'd expect to see the authors publish a result in the wrong direction about $42\%$ of the time.
+
+Now we work through the same series of calculations under the presumption the true difference is 0.5.
+
+```{r}
+# probability of a positive difference
+(p_positive <- 1 - pnorm(6, mean = 0.5, sd = 3))
+
+# probability of a negative difference (i.e., in the wrong direction)
+(p_negative <- pnorm(-6, mean = 0.5, sd = 3))
+
+# type S error rate
+p_negative / (p_negative + p_positive)
+```
+
+The type S error rate is $31\%$.
+
+## 16.6 Design analysis using fake-data simulation
+
+> The most general and often the clearest method for studying the statistical properties of a proposed design is to simulate the data that might be collected along with the analyses that could be performed. We demonstrate with an artificial example of a randomized experiment on 100 students designed to test an intervention for improving final exam scores. (p. 306)
+
+The point to keep in mind, here, is this is a two-group design where the DV is *only* measured after the intervention. In that sense, the data are cross-sectional.
+
+### 16.6.1 Simulating a randomized experiment.
+
+Simulate the data where the treatment effect, $\theta$, is 5 points.
+
+```{r}
+# how many would you like?
+# note. this should be an even number
+n <- 100
+
+# simulate
+set.seed(16)
+
+fake <-
+  tibble(z = sample(rep(0:1, times = n / 2))) %>% 
+  mutate(y = ifelse(z == 0,
+                    rnorm(n(), mean = 60, sd = 20),
+                    rnorm(n(), mean = 65, sd = 20)))
+
+# what did we do?
+fake
+```
+
+Here's a quick look at the data.
+
+```{r, fig.width = 4, fig.height = 2.75}
+fake %>% 
+  mutate(z = factor(z)) %>% 
+  
+  ggplot(aes(x = y, y = z, fill = z)) +
+  stat_dotsinterval(.width = .5, slab_size = 0) +
+  scale_fill_viridis_d(option = "B", begin = .5, end = .8) +
+  coord_cartesian(ylim = c(1.5, 2.25)) +
+  theme(legend.position = "none")
+```
+
+Here we compute the sample difference and its standard error.
+
+```{r}
+# conditional means
+mean_0 <- filter(fake, z == 0) %>% summarise(m = mean(y)) %>% pull()
+mean_1 <- filter(fake, z == 1) %>% summarise(m = mean(y)) %>% pull()
+
+# conditional SDs
+sd_0 <- filter(fake, z == 0) %>% summarise(s = sd(y)) %>% pull()
+sd_1 <- filter(fake, z == 1) %>% summarise(s = sd(y)) %>% pull()
+
+# sample sizes
+n_0 <- filter(fake, z == 0) %>% count() %>% pull()
+n_1 <- filter(fake, z == 0) %>% count() %>% pull()
+
+# sample difference
+mean_1 - mean_0
+
+# standard error for the difference
+sqrt(sd_0^2 / n_0 + sd_1^2 / n_1)
+```
+
+Now fit the Bayesian model using **brms** default priors.
+
+```{r m16.9, warning = F, message = F}
+m16.9 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ z, 
+      seed = 16,
+      file = "fits/m16.09")
+```
+
+Check the results.
+
+```{r}
+print(m16.9, robust = T)
+```
+
+The sample values we computed by hand, above, are very close to the posterior median and scale for the `z` parameter.
+
+Now repeat the process of simulating data and fitting the model, with a new batch of `fake` data produced by our use of a different seed value.
+
+```{r m16.10, warning = F, message = F}
+# set a different seed
+set.seed(160)
+
+# simulate
+fake <-
+  tibble(z = sample(rep(0:1, times = n / 2))) %>% 
+  mutate(y = ifelse(z == 0,
+                    rnorm(n(), mean = 60, sd = 20),
+                    rnorm(n(), mean = 65, sd = 20)))
+
+# fit
+m16.10 <- 
+  update(m16.9,
+         newdata = fake,
+         seed = 16,
+         file = "fits/m16.10")
+```
+
+Here we use `fixef()` to make a focused comparison of the `z` coefficients for this model and the last.
+
+```{r}
+fixef(m16.9, robust = T)["z", ] %>% round(digits = 2)
+fixef(m16.10, robust = T)["z", ] %>% round(digits = 2)
+```
+
+Though the standard errors are fairly consistent between the two, the absolute value of the posterior mean is quite different. 
+
+> A naive read of this table would be that the design with 100 students is just fine, as the estimate is [about] two standard errors away from zero. But that conclusion would be a mistake, as the coefficient estimate here is too noisy to be useful.
+>
+> The above simulation indicates that, under the given assumptions, the randomized design with 100 students gives an estimate of the treatment effect with standard error of approximately 4 points. If that is acceptable, fine. If not, one approach would be to increase the sample size. (p. 307)
+
+### 16.6.2 Including a pre-treatment predictor.
+
+"Another approach to increase efficiency is to consider a pre-test. Suppose pre-test scores $x$ have the same distribution as post-test scores $y$ but with a slightly lower average" (p. 307). Here we add in the pre-score, which we call `x`.
+
+```{r}
+set.seed(16)
+
+fake <-
+  fake %>% 
+  mutate(x = rnorm(n, mean = 50, sd = 20))
+
+# what did we do?
+head(fake)
+```
+
+To get a sense of the data, here they are in a faceted line plot.
+
+```{r, fig.width = 4.5, fig.height = 2.75, message = F}
+fake %>% 
+  mutate(id = 1:n()) %>% 
+  pivot_longer(y:x) %>% 
+  mutate(time = ifelse(name == "x", 0, 1)) %>% 
+  
+  ggplot(aes(x = time, y = value)) +
+  geom_line(aes(group = id),
+            size = 1/4, alpha = 3/4) +
+  stat_smooth(method = "lm", se = F, size = 2.5) +
+  scale_x_continuous(NULL, breaks = 0:1, labels = c("pre", "post")) +
+  ylab("test score") +
+  facet_wrap(~ z, labeller = label_both)
+```
+
+The participant-level scores are depicted by the thin black lines. The thicker blue lines are the group averages. Now fit the corresponding model with **brms**.
+
+```{r m16.11, warning = F, message = F}
+m16.11 <- 
+  brm(data = fake, 
+      family = gaussian,
+      y ~ z + x, 
+      seed = 16,
+      file = "fits/m16.11")
+```
+
+Check the summary.
+
+```{r}
+print(m16.11, robust = T)
+```
+
+In this case, including the pre-treatment covariate `x` didn't reduce the standard error much for `z`. This is because of how we simulated the `x` and `y` values independent from one another. Now make a different version of the trial data, called `fake_2`. This time, `y` is conditional on both `z` and the true score underlying `x`.
+
+```{r}
+set.seed(16)
+
+fake_2 <-
+  tibble(z            = sample(rep(0:1, times = n / 2)),
+         true_ability = rnorm(n, mean = 50, sd = 16)) %>% 
+  mutate(x = true_ability + rnorm(n(), mean = 0, sd = 12)) %>% 
+  mutate(y = ifelse(z == 0,
+                    true_ability + rnorm(n(), mean = 10, sd = 12),
+                    true_ability + rnorm(n(), mean = 15, sd = 12)))
+```
+
+Here's the faceted line plot of the `fake_2` data.
+
+```{r, fig.width = 4.5, fig.height = 2.75, message = F}
+fake_2 %>% 
+  mutate(id = 1:n()) %>% 
+  pivot_longer(y:x) %>% 
+  mutate(time = ifelse(name == "x", 0, 1)) %>% 
+  
+  ggplot(aes(x = time, y = value)) +
+  geom_line(aes(group = id),
+            size = 1/4, alpha = 3/4) +
+  stat_smooth(method = "lm", se = F, size = 2.5) +
+  scale_x_continuous(NULL, breaks = 0:1, labels = c("pre", "post")) +
+  ylab("test score") +
+  facet_wrap(~ z, labeller = label_both)
+```
+
+Now fit the two model types to the new `fake` data.
+
+```{r m16.12, warning = F, message = F}
+# univariable (y ~ z)
+m16.12 <- 
+  brm(data = fake_2, 
+      family = gaussian,
+      y ~ z, 
+      seed = 16,
+      file = "fits/m16.12")
+
+# bivariable (y ~ z + x)
+m16.13 <- 
+  brm(data = fake_2, 
+      family = gaussian,
+      y ~ z + x, 
+      seed = 16,
+      file = "fits/m16.13")
+```
+
+Check the summaries for the two models.
+
+```{r}
+print(m16.12, robust = T)
+print(m16.13, robust = T)
+```
+
+Now `x` is a better predictor of `y` and, as a consequence, the standard error for the `z` coefficient is reduced. This might be easier to see if we make use `fixef()` to focus the comparisons.
+
+```{r}
+fixef(m16.12, robust = T)["z", ] %>% round(digits = 2)
+fixef(m16.13, robust = T)["z", ] %>% round(digits = 2)
+```
+
+We can make a similarly-focused comparison of the $\sigma$ parameter using `posterior_summary()`.
+
+```{r}
+posterior_summary(m16.12, robust = T)["sigma", ] %>% round(digits = 2)
+posterior_summary(m16.13, robust = T)["sigma", ] %>% round(digits = 2)
+```
+
+The posterior is about 1/4 smaller in the bivariable model.
+
+### 16.6.3 Simulating an experiment with selection bias.
+
+Now 
+
+> suppose that school administrators, out of kindness, are more likely to give the treatment to students who are performing poorly. We could simulate this behavior with an unequal-probability assignment rule such as $\operatorname{Pr}(z_i = 1) = \operatorname{logit}^{-1}(-(x_i - 50) / 20)$, where we have chosen the logistic curve for convenience and set its parameters so that the probability averages to approximately 0.5, with a bit of variation from one end of the data to the other. (pp. 308--309)
+
+Here's how to simulate such data.
+
+```{r}
+# define the invlogit() function
+invlogit <- plogis
+
+# update the simulation
+set.seed(16)
+
+fake_3 <-
+  fake_2 %>% 
+  # change the treatment assignment
+  mutate(z = rbinom(n, 1, invlogit(-(x - 50) / 20))) %>% 
+  # update the consequences for the post-treatment test scores
+  mutate(y = ifelse(z == 0,
+                    true_ability + rnorm(n(), mean = 10, sd = 12),
+                    true_ability + rnorm(n(), mean = 15, sd = 12)))
+```
+
+Like before, now we make the faceted line plot of the `fake_3` data.
+
+```{r, fig.width = 4.5, fig.height = 2.75, message = F}
+fake_3 %>% 
+  mutate(id = 1:n()) %>% 
+  pivot_longer(y:x) %>% 
+  mutate(time = ifelse(name == "x", 0, 1)) %>% 
+  
+  ggplot(aes(x = time, y = value)) +
+  geom_line(aes(group = id),
+            size = 1/4, alpha = 3/4) +
+  stat_smooth(method = "lm", se = F, size = 2.5) +
+  scale_x_continuous(NULL, breaks = 0:1, labels = c("pre", "post")) +
+  ylab("test score") +
+  facet_wrap(~ z, labeller = label_both)
+```
+
+To look at the data in another way, here's our version of Figure 16.5.
+
+```{r, fig.width = 4.5, fig.height = 2.75, message = F}
+fake_3 %>% 
+  mutate(z = ifelse(z == 0, 0.015, 0.985)) %>% 
+  
+  ggplot(aes(x = x, y = z)) +
+  geom_point(alpha = 2/3) +
+  stat_function(fun = ~ invlogit(-(.x - 50) / 20)) +
+  annotate(geom = "text",
+           x = c(58, 48), y = c(0.075, 0.925),
+           label = c("(assigned to control group, z=0)",
+                     "(assigned to treatment group, z=1)"),
+           size = 3, color = "grey25") +
+  scale_x_continuous("Pre-test score", breaks = 0:5 * 20, 
+                     expand = c(0, 0), limits = c(-15, 105)) +
+  scale_y_continuous(expression(Pr(z==1)), breaks = 0:2 / 2,
+                     expand = c(0, 0), limits = 0:1)
+```
+
+"By construction, the true treatment effect is 5 points, as before, but a simple comparison yields a biased estimate, while the linear regression adjusting for pre-test is better" (p. 309). Gelman et al didn't show the results of the model for this version of the data. Let's fit and summarize, real quick.
+
+```{r m16.14, warning = F, message = F}
+# fit univariable (y ~ z)
+m16.14 <- 
+  brm(data = fake_3, 
+      family = gaussian,
+      y ~ z, 
+      seed = 16,
+      file = "fits/m16.14")
+
+# fit bivariable (y ~ z + x)
+m16.15 <- 
+  brm(data = fake_3, 
+      family = gaussian,
+      y ~ z + x, 
+      seed = 16,
+      file = "fits/m16.15")
+
+# summarize and compare
+fixef(m16.14, robust = T)["z", ] %>% round(digits = 2)
+fixef(m16.15, robust = T)["z", ] %>% round(digits = 2)
+```
+
+Holy smokes! Yep, like they said, the "simple comparison yields a biased estimate, while the linear regression adjusting for pre-test is better."
+
+Now, like in the text, we'll prepare to make simulation-based comparisons of this kind in bulk. Our approach will be to wrap the data simulation, model fitting, and model summarizing steps into a single function. We'll call our function `sim_fit_compare()`. It has two arguments, which will allow us to adjust the `seed` values and the total sample size.
+
+```{r}
+sim_fit_compare <- function(seed = 1, n = 100, ...){
+  
+  # simulate
+  set.seed(seed)
+  
+  fake_sim <-
+    tibble(true_ability = rnorm(n, mean = 50, sd = 16)) %>% 
+    mutate(x = true_ability + rnorm(n, mean = 0, sd = 12)) %>% 
+    mutate(z = rbinom(n, 1, invlogit(-(x - 50) / 20))) %>% 
+    mutate(y = ifelse(z == 0,
+                      true_ability + rnorm(n(), mean = 10, sd = 12),
+                      true_ability + rnorm(n(), mean = 15, sd = 12)))
+  
+  ## fit the two models
+  # univariable (y ~ z)
+  m_univariable <- 
+    update(m16.14,
+           newdata = fake_sim, 
+           seed = seed)
+  
+  # fit bivariable (y ~ z + x)
+  m_bivariable <- 
+    update(m16.15,
+           newdata = fake_sim, 
+           seed = seed)
+  
+  # summarize and compare
+  type <- c("univariable", "bivariable")
+  
+  summary <-
+    data.frame(
+      model = factor(type, levels = type),
+      rbind(fixef(m_univariable, robust = T)["z", ],
+            fixef(m_bivariable,  robust = T)["z", ])
+    )
+  
+  return(summary)
+  
+}
+```
+
+Now we run the simulation 100 times, saving the results in a nested tibble called `sim`.
+
+```{r, echo = F}
+# sim <-
+#   tibble(seed = 1:100) %>% 
+#   mutate(z = map(seed, sim_fit_compare))
+# 
+# save(sim, file = "sims/sim_16.01.rda")
+
+load("sims/sim_16.01.rda")
+```
+
+```{r, eval = F}
+sim <-
+  tibble(seed = 1:100) %>% 
+  mutate(z = map(seed, sim_fit_compare))
+```
+
+Like in the text, we summarize the posterior medians and MAD SDs by their means.
+
+```{r}
+sim %>% 
+  unnest(z) %>% 
+  group_by(model) %>% 
+  summarise(Estimate = mean(Estimate),
+            Est.Error = mean(Est.Error)) %>% 
+  mutate_if(is.double, round, digits = 2)
+```
+
+The bivariable model did a reasonable job capturing the true effect size of 5.
 
 ## Session info {-}
 
