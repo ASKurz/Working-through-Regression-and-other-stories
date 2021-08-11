@@ -9,7 +9,7 @@ I prefer it when asked questions in an open format, such as in a [GitHub issue](
 
 ## *I would like to contribute*.
 
-I'm really not looking for contributions, at this time. However, if you find gross errors or have concerns, feel free to open a [GitHub issue](https://github.com/ASKurz/Working-through-Regression-and-other-stories/issues).
+I'm really not looking for contributions, at this time. However, if you find gross errors or have concerns, feel free to open a [GitHub issue](https://github.com/ASKurz/Working-through-Regression-and-other-stories/issues). To report typos, please list them by book section and a brief identifying quote in the [typos](https://github.com/ASKurz/Working-through-Regression-and-other-stories/issues/2) section in the issues.
 
 ## Code style
 
