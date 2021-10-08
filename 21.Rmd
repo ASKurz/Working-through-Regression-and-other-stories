@@ -1,0 +1,491 @@
+---
+title: "Chapter 21: Additional topics in causal inference"
+author: "A. Solomon Kurz"
+date: "`r format(Sys.Date())`"
+output:
+  github_document
+---
+
+```{r, eval = F, echo = F}
+https://github.com/avehtari/ROS-Examples/
+```
+
+```{r, echo = F, cache = F}
+knitr::opts_chunk$set(fig.retina = 2.5)
+knitr::opts_chunk$set(fig.align = "center")
+# options(width = 100)
+```
+
+# Additional topics in causal inference
+
+> The previous chapters described causal inference strategies that assume ignorability of exposure or treatment assignment. It is reasonable to be concerned about this assumption, however. After all, when are we really confident that we have measured *all* confounders? This chapter explores several alternative causal inference strategies that rely on slightly different sets of assumptions that may be more plausible in certain settings. (p. 421, *emphasis* in the original)
+
+## 21.1 Estimating causal effects indirectly using instrumental variables
+
+> In some situations when the argument for ignorability of the treatment assignment seems weak, there may exist another variable that does appear to be randomly assigned or can be considered as such. If this variable, called the *instrument*, $z$, is predictive of the treatment, $T$, then we *may* be able to use it to isolate a particular kind of targeted causal estimand. The instrument should only affect the treatment assignment but not have a direct effect on the outcome, an *exclusion restriction* that we explain more precisely below. (p. 421, *emphasis* in the original)
+
+### Example: a randomized-encouragement design.
+
+Load the `sesame.csv` data.
+
+```{r, warning = F, message = F}
+library(tidyverse)
+
+sesame <- read_csv("ROS-Examples-master/Sesame/data/sesame.csv")
+
+glimpse(sesame)
+head(sesame)
+```
+
+Because one cannot force children to watch Sesame Street, one can only randomize whether the children were encouraged to watch the show. Also, some of the children who were not explicitly encouraged will still watch the show. Thus, this is study is called a *randomized encouragement design*.
+
+```{r}
+sesame %>% 
+  count(encouraged, watched)
+```
+
+### Compliance as an intermediate potential outcome.
+
+### Assumptions for instrumental variables estimation.
+
+#### Ignorability of the instrument.
+
+The assumption of "*ignorability of the instrument* with respect to the potential outcomes (both for the primary outcome of interest and the treatment variable)," $y^0, y^1\ \bot\ z$, is "satisfied in a randomized experiment (assuming the randomization was pristine), assuming, as always, that any design features are reflected in the analysis" (p. 422, *emphasis* in the original).
+
+#### Monotonicity.
+
+> In defining never-takers and always-takers, we assumed that there were no children who would watch if they were not encouraged but who would *not* watch if they *were* encouraged; that is, we assumed that there were no defiers. Formally this is called the *monotonicity assumption*, and it will not necessarily hold in practice, though there are many situations in which it is defensible. (p. 423, *emphasis* in the original)
+
+#### Nonzero association between instrument and treatment variable.
+
+> To demonstrate how we can use the instrument to obtain a causal estimate of the treatment effect in our example, first consider that about 90% of those encouraged watched the show regularly; by comparison, only 55% of those not encouraged watched the show regularly. Therefore, if we are interested in the effect of actually viewing the show, we should focus on the 35% of the treatment population who decided to watch the show because they were encouraged but who otherwise would not have watched the show. If the instrument (encouragement) did not affect regular watching, then we could not proceed. (p. 423)
+
+#### Exclusion restriction.
+
+> To estimate the effect of viewing for those children whose viewing behavior would have been affected by the encouragement (the induced watchers), we must make another important assumption, called the *exclusion restriction*. This assumption says for those children whose behavior would not have been changed by the encouragement (never-takers and always-takers) there is no effect of encouragement on outcomes. (p. 423, *emphasis* in the original)
+
+### Derivation of instrumental variables estimation with complete data (including unobserved potential outcomes).
+
+Make the data in Figure 21.1.
+
+```{r}
+fig21.1 <-
+  tibble(unit = 1:20,
+         t0 = rep(c(0:1, 0:1), times = c(6, 4, 6, 4)),
+         t1 = rep(c(1:0, 1:0, 1), times = c(4, 2, 8, 2, 4))) %>% 
+  mutate(compliance = case_when(
+    t0 == 0 & t1 == 1 ~ "complier",
+    t0 == 0 & t1 == 0 ~ "never-taker",
+    t0 == 1 & t1 == 1 ~ "always-taker"
+  )) %>% 
+  mutate(encouragement = rep(0:1, each = 10)) %>% 
+  mutate(y0 = c(67, 72, 74, 68, 68, 70, 76, 74, 80, 82, 67, 72, 74, 68, 68, 70, 76, 74, 80, 82),
+         y1 = c(76, 80, 81, 78, 68, 70, 76, 74, 80, 82, 76, 80, 81, 78, 68, 70, 76, 74, 80, 82)) %>% 
+  mutate(effect = y1 - y0)
+
+fig21.1
+```
+
+If you were in the enviable (and unrealistic) position of having the full array of potential outcomes you can compute each participant's treatment effect by hand. Then the intent-to-treat effect is the simple average of those effects.
+
+```{r}
+fig21.1 %>% 
+  summarise(itt = sum(effect) / n())
+```
+
+Note how, in Table 21.1, the individual-level causal effect is always zero for both the never-takers and the always-takers.
+
+Now note that the treatment effect for the compliers is higher.
+
+```{r}
+fig21.1 %>% 
+  filter(compliance == "complier") %>% 
+  summarise(itt = sum(effect) / n())
+```
+```{r}
+fig21.1 %>% 
+  group_by(compliance == "complier") %>% 
+  summarise(itt = mean(effect),
+            n = n()) %>% 
+  mutate(percent = n / sum(n))
+```
+
+Note also that the effect for the compliers is equal to the intent-to-treat effect estimate divided by the proportion of compliers.
+
+```{r}
+fig21.1 %>% 
+  summarise(itt = mean(effect),
+            proportion_compliers = mean(compliance == "complier")) %>% 
+  mutate(effect_on_compliers = itt / proportion_compliers)
+```
+
+### Deconstructing the complier average causal effect.
+
+The intent-to-treat effect is basically a weighted average of four different ITT effects--the compliers, the never-takers, the always-takers, and the defiers. The exclusion criterion sets the never-takers, the always-takers, and the defiers all to 0. Thus the complier average causal effect (CACE) is
+
+$$\text{ITT}_{c = \text{complier}} = \text{CACE} = \frac{\text{ITT}}{\text{Pr}(c = \text{complier})} = \frac{\text{ITT}}{\text E \big (T(z = 1) - T(z = 0) \big)}.$$
+
+#### Violations of ignorability.
+
+Violations of the ignorability assumption could lead to either positive or negative bias.
+
+#### Violations of the exclusion restriction.
+
+"*Weak instruments*--those that are not strongly predictive of the treatment--will be highly vulnerable to violations of the exclusion restriction" (p. 425, *emphasis* in the original).
+
+#### Violations of the monotonicity assumption.
+
+"If the monotonicity assumption is violated, then $\text{Pr}(c = \text{defier}) \neq 0$ and consequently the equivalence between $\text{Pr}(c = \text{complier})$ and $\text E (T(1) - T(0))$ is lost" (p. 425).
+
+### Local average treatment effect (LATE) versus intent-to-treat effect (ITT).
+
+> As we have discussed, the instrumental variables strategy here does not estimate an overall effect of watching Sesame Street across everyone in the study, or even an effect for all those treated. The complier average causal effect (CACE) estimate applies only to those children whose treatment receipt is dictated by their randomized instrument assignment and is a special case of what is commonly called a *local average treatment effect* (LATE) by economists. (p. 426, *emphasis* in the original)
+
+The ITT or the CACE can be of interest, depending on the research question. Perhaps it's best to compute and report both.
+
+### Instrumental variables estimate: Sesame Street.
+
+Here's the ITT analysis, as presented in the text.
+
+```{r, warning = F, message = F, results = "hide"}
+library(rstanarm)
+
+itt_zt <- 
+  stan_glm(data = sesame,
+           watched ~ encouraged)
+```
+
+Check the summary.
+
+```{r}
+print(itt_zt)
+```
+
+Note how we used the conventional Gaussian likelihood. Here's the **brms** alternative.
+
+```{r m21.1, warning = F, message = F}
+library(brms)
+
+m21.1 <- 
+  brm(data = sesame,
+      family = gaussian,
+      watched ~ encouraged,
+      cores = 4,
+      seed = 21,
+      file = "fits/m21.01")
+```
+
+Check the summary.
+
+```{r}
+print(m21.1)
+```
+
+The proportion of compliers in the data is .36. We can express the simple intent-to-treat estimate as
+
+$$
+\begin{align*}
+\text{postlet}_i & \sim \operatorname{Normal}(\mu_i, \sigma) \\
+\mu_i & = \beta_0 + \beta_1 \text{encouraged}_i.
+\end{align*}
+$$
+
+Fit the model.
+
+```{r m21.2, warning = F, message = F}
+m21.2 <- 
+  brm(data = sesame,
+      family = gaussian,
+      postlet ~ encouraged,
+      cores = 4,
+      seed = 21,
+      file = "fits/m21.02")
+```
+
+Check the summary.
+
+```{r}
+print(m21.2)
+```
+
+Thus, the ITT causal effect is 2.8 95% CI [-0.7, 6.3]. Here's the point estimate for the CASE.
+
+```{r}
+fixef(m21.2)["encouraged", 1] / fixef(m21.1)["encouraged", 1]
+```
+
+The CACE estimate is much higher than the point estimate for the ITT effect.
+
+## 21.2 Instrumental variables in a regression framework
+
+If we let $y$ be the treatment outcome of interest, $t$ be the indicator of treatment compliance, $z$ be the instrumental variable (often experimental randomization), and $i$ index the participants, we can express the generic instrumental variable framework as
+
+$$
+\begin{align*}
+\begin{bmatrix} \color{purple}{t_i} \\ \color{blue}{y_i} \end{bmatrix} & \sim \operatorname{Normal} \left (\begin{bmatrix} \color{purple}{\nu_i} \\ \color{blue}{\mu_i} \end{bmatrix}, \begin{bmatrix} \sigma_t \\ \sigma_y \end{bmatrix} \right) \\
+\color{purple}{\nu_i} & = \gamma_0 + \gamma_1 \color{red}{z_i} \\
+\color{blue}{\mu_i} & = \beta_0 + \beta_1 \color{purple}{t_i},
+\end{align*}
+$$
+
+where the residual standard deviations are presumed orthogonal and $z_i$ is also presumed to be orthogonal to both. This fulfills the assumption "the instrument only affects the outcome through its effect on the treatment" (p. 427). Though we use Gaussian likelihood as a default, we could generalize.
+
+### Identifiability with instrumental variables.
+
+#### Other models.
+
+### Two-stage least squares: Sesame Street.
+
+The conventional *two-stage least squares* (TSLS) approach accomplishes the estimation difficulties by using the adjusted formula
+
+$$
+\begin{align*}
+\begin{bmatrix} \color{purple}{t_i} \\ \color{blue}{y_i} \end{bmatrix} & \sim \operatorname{Normal} \left (\begin{bmatrix} \color{purple}{\nu_i} \\ \color{blue}{\mu_i} \end{bmatrix}, \begin{bmatrix} \sigma_t \\ \sigma_y \end{bmatrix} \right) \\
+\color{purple}{\nu_i} & = \gamma_0 + \gamma_1 \color{red}{z_i} \\
+\color{blue}{\mu_i} & = \beta_0 + \beta_1 \color{purple}{\hat t_i},
+\end{align*}
+$$
+
+which is identical to the first with the exception that the predictor in the formula for $\mu_i$ is now $\hat t_i$, the residuals from the first model. Here's how to fit the model using the OLS `lm()` function.
+
+```{r}
+# stage one
+# fit the model on how the experiment influenced compliance
+fit_2a <- lm(
+  data = sesame,
+  watched ~ encouraged) 
+
+# pull the fitted values
+sesame <- sesame %>% 
+  mutate(watched_hat = fitted(fit_2a))
+
+# stage two
+# fit the model on how the fitted compliance values predice the outcome
+fit_2b <- lm(
+  data = sesame,
+  postlet ~ watched_hat)
+
+# summarize
+summary(fit_2a)
+summary(fit_2b)
+```
+
+The coefficient for `encouraged` in the first model satisfies the assumption the instrument influences treatment compliance. The coefficient for `watched_hat` in the second model is the causal effect of treatment compliance on the outcome, "the effect of watching Sesame Street on letter recognition for those who would watch if encouraged but not otherwise (compliers)" (p. 428).
+
+> This second-stage regression does not give the correct standard error, however, as we discuss below. (p. 428)
+
+Just to refresh, take a peek at that data structure.
+
+```{r}
+sesame %>% 
+  select(postlet, watched, watched_hat, encouraged) %>% 
+  head()
+```
+
+### Adjusting for covariates in an instrumental variables framework.
+
+> It turns out that the randomization for this particular experiment took place within sites and settings; it is therefore appropriate to adjust for these covariates in estimating the treatment effect. Additionally, pre-test scores are available that are highly predictive of post-test scores. Our preferred model would adjust for all of these predictors.  (p. 428)
+
+The updated model takes the form
+
+$$
+\begin{align*}
+\begin{bmatrix} \color{purple}{\text{watched}_i} \\ \color{blue}{\text{postlet}_i} \end{bmatrix} & \sim \operatorname{Normal} \left (\begin{bmatrix} \color{purple}{\nu_i} \\ \color{blue}{\mu_i} \end{bmatrix}, \begin{bmatrix} \sigma_t \\ \sigma_y \end{bmatrix} \right) \\
+
+\color{purple}{\nu_i} & = \gamma_0 + \gamma_1 \color{red}{\text{encouraged}_i} + 
+\gamma_2 \color{darkorange}{\text{prelet}_i} + 
+\gamma_3 \color{darkorange}{\text{site}_i} + 
+\gamma_4 \color{darkorange}{\text{setting}_i} \\
+
+\color{blue}{\mu_i} & = \beta_0 + \beta_1 \color{purple}{\widehat{\text{watched}}_i}  + 
+\beta_2 \color{darkorange}{\text{prelet}_i} + 
+\beta_3 \color{darkorange}{\text{site}_i} + 
+\beta_4 \color{darkorange}{\text{setting}_i},
+\end{align*}
+$$
+
+where the covariates are depicted in orange font.
+
+```{r}
+# stage one
+# fit the model on how the experiment influenced compliance
+fit_3a <- lm(
+  data = sesame,
+  watched ~ encouraged + prelet + as.factor(site) + setting) 
+
+# pull the fitted values
+sesame <- sesame %>% 
+  mutate(watched_hat_3 = fitted(fit_3a))
+
+# stage two
+# fit the model on how the fitted compliance values predice the outcome
+fit_3b <- lm(
+  data = sesame,
+  postlet ~ watched_hat_3 + prelet + as.factor(site) + setting)
+
+# summarize
+summary(fit_3a)
+summary(fit_3b)
+```
+
+The adjusted model returned a substantially larger causal effect. Yet,
+
+> again, we do not trust this standard error and will discuss later how to appropriately adjust it for the two stages of estimation. (p. 429)
+
+### Standard errors for instrumental variables estimates.
+
+Manually adjusting the standard errors is a slog. I'm going to break up Gelman et al's code into small bits. First, we extract the predictor matrix for `fit_3b` save the results with two names.
+
+```{r}
+X_adj <- X <- model.matrix(fit_3b)
+
+# X_adj and X are the same
+str(X_adj)
+```
+
+If you use compact notation $Y = X\beta$ for the outcome model, we just extracted the full $X$ matrix.
+
+Now in the `X_adj` matrix, we switch out the values in the `watched_hat_3` vector for the original `watched` values from the data. 
+
+```{r}
+X_adj[, "watched_hat_3"] <- sesame$watched
+```
+
+Save the dimensions of the $X$ matrix.
+
+```{r}
+n <- nrow(X)
+p <- ncol(X)
+```
+
+Compute the root mean squared error for both `X` and `X_adj`.
+
+```{r}
+RMSE1 <- sqrt(sum((sesame$postlet - X     %*% coef(fit_3b))^2) / (n - p)) 
+RMSE2 <- sqrt(sum((sesame$postlet - X_adj %*% coef(fit_3b))^2) / (n - p))
+```
+
+Now we compare the original standard error for $\beta_1$ with the corrected standard error.
+
+```{r}
+# compute
+se_adj <- summary(fit_3b)$coef["watched_hat_3", 2] * RMSE1 / RMSE2
+
+# compare standard errors
+summary(fit_3b)$coef["watched_hat_3", 2]  # original (invalid)
+se_adj  # adjusted
+```
+
+The corrected standard error is a bit larger. Here we compare the original $t$ value with the adjusted $t$ value.
+
+```{r}
+summary(fit_3b)$coef["watched_hat_3", 3]  # original (invalid)
+summary(fit_3b)$coef["watched_hat_3", 1] / se_adj  # adjusted
+```
+
+### Performing two-stage least squares automatically using brms.
+
+One can use full-luxury Bayesian inference via **brms** to replace the two-step model with a bivariate model following the form
+
+$$
+\begin{align*}
+\begin{bmatrix} \color{purple}{t_i} \\ \color{blue}{y_i} \end{bmatrix} & \sim \operatorname{Normal} \left (\begin{bmatrix} \color{purple}{\nu_i} \\ \color{blue}{\mu_i} \end{bmatrix}, \mathbf \Sigma \right) \\
+
+\color{purple}{\nu_i} & = \gamma_0 + \gamma_1 \color{red}{z_i} \\
+\color{blue}{\mu_i} & = \beta_0 + \beta_1 \color{purple}{\hat t_i} \\
+
+\mathbf \Sigma & = \mathbf S \mathbf R \mathbf S \\
+\mathbf S & = \begin{bmatrix} \sigma_t & 1 \\ 1 & \sigma_y  \end{bmatrix} \\
+\mathbf R & = \begin{bmatrix} 1 & \rho \\ \rho & 1  \end{bmatrix},
+\end{align*}
+$$
+
+where the models for $t_i$ and $y_i$ are simultaneously fit with the bivariate normal distribution and the new parameter $\rho$ captures any residual covariance between the two variables. The major advantage of this approach is all the standard errors will be correct from the outset. 
+
+Here's how to fit the model with **brms**.
+
+```{r m21.3, warning = F, message = F}
+f1 <- bf(watched ~ encour)
+f2 <- bf(postlet ~ watched)
+
+m21.3 <-
+  brm(data = sesame,
+      family = gaussian,
+      f1 + f2 + set_rescor(TRUE),
+      cores = 4,
+      seed = 21,
+      file = "fits/m21.03")
+```
+
+Check the results.
+
+```{r}
+print(m21.3, robust = T)  # overall
+fixef(m21.3, robust = T)["postlet_watched", ]  # focused
+```
+
+Here's the expanded bivariate normal model.
+      
+```{r m21.4, warning = F, message = F}
+f1 <- bf(watched ~ encour + prelet + setting + factor(site))
+f2 <- bf(postlet ~ watched + prelet + setting + factor(site))
+
+m21.4 <- 
+  brm(data = sesame,
+      family = gaussian,
+      f1 + f2 + set_rescor(TRUE),
+      cores = 4,
+      seed = 21,
+      file = "fits/m21.04")
+```
+
+Check the results.
+
+```{r}
+print(m21.4, robust = T)  # overall
+fixef(m21.4, robust = T)["postlet_watched", ]  # focused
+```
+
+### More than one treatment variable; more than one instrument.
+
+> A single instrument cannot be used to identify more than one treatment variable. As a general rule, we need to use at least as many instruments as treatment variables in order for all the causal estimates to be identifiable. (p. 430)
+
+### Continuous treatment variables or instruments.
+
+> When using two-stage least squares, the models we have discussed can easily be extended to accommodate continuous treatment variables and instruments, although at the cost of complicating the interpretation of the causal effects. (p. 430)
+
+### Have we really avoided the ignorability assumption?
+
+> Broadly speaking, if the ignorability assumption is not highly plausible, the expected gains from performing an instrumental variables analysis are not likely to outweigh the potential for bias. (p. 431)
+
+### Plausibility of exclusion restriction.
+
+### Weak instruments.
+
+> A weak instrument can exacerbate the bias that can result from failure to satisfy the ignorability or monotonicity assumptions or the exclusion restriction. If a weak instrument leads to a small proportion of compliers, this increases the potential for bias if one of these assumptions is violated. (p. 431)
+
+### Structural equation models.
+
+## 21.3 Regression discontinuity: known assignment mechanism but no overlap
+
+
+
+
+
+
+
+## Session info {-}
+
+```{r}
+sessionInfo()
+```
+
+```{r, warning = F, echo = F, eval = F}
+rm(list = ls())
+```
+
+```{r, echo = F, message = F, warning = F, results = "hide", eval = F}
+ggplot2::theme_set(ggplot2::theme_grey())
+pacman::p_unload(pacman::p_loaded(), character.only = TRUE)
+```
+
