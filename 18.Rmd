@@ -7,6 +7,7 @@ output:
 ---
 
 ```{r, eval = F, echo = F}
+# GitHub home for the book at
 https://github.com/avehtari/ROS-Examples/
 ```
 
@@ -73,6 +74,8 @@ d
 
 Because of potential history effects, you cannot simply substitute someone's pre-treatment measure of the criterion for what their post measure would have been had they not been in the treatment condition. Say we're talking about the $j$th participant. Maybe $y_j^\text{before} = y_j^0$, or maybe $y_j^\text{before} \neq y_j^0$. Even if you do some kind of ABA design, this is only valid if the treatment in B has short-term effects. Sometimes you can overcome this with a *washout period*, ABCA. Randomizing large numbers of people to treatment conditions helps, some.
 
+But also notice that even with an ABA or ABCA design, you still don't really overcome the missing-data problem with causal inference. A person is only in one given phase at a time. At best, only 50% of the data are ever present in the real world.
+
 ### 18.1.5 More than two treatment levels, continuous treatments, and multiple treatment factors.
 
 > Going beyond a simple treatment-and-control setting, multiple treatment effects can be defined relative to a baseline level. With random assignment, this simply follows general principles of regression modeling....
@@ -93,23 +96,43 @@ d %>%
          y1 = rep(c(27:28, 31:32) * 5, each = 2))
 ```
 
-If we actually had this information, we could compute $\tau_i = y_i^1 - y_i^0$, the individual treatment effect for all $i$ cases.
-
-### 18.2.1 Sample average treatment effect (SATE).
-
-Here's the average treatment effect, if we had all the data.
+If we actually had this information, we could compute $\tau_i = y_i^1 - y_i^0$, the individual treatment effect for all $i$ cases. Thus, here are the $\tau_i$ values.
 
 ```{r}
 d %>% 
   mutate(y0 = rep(14:17 * 10, each = 2),
          y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
-  mutate(y = y1 - y0) %>% 
-  summarise(mean_tx_effect = mean(y))
+  mutate(tau = y1 - y0)
 ```
 
-You call this the sample average treatment effect (SATE), which may be defined as
+A careful eye will notice how the men (`female == 0`) all have $\tau_i$ values if -10, whereas the women all have values of -5.
 
-$$\tau_\text{SATE} = \frac{1}{n} \sum_{i = 1}^n (y_i^1 = y_i^0).$$
+### 18.2.1 Sample average treatment effect (SATE).
+
+Here's how we might compute the average treatment effect, if we had all the data.
+
+```{r}
+d %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(tau = y1 - y0) %>% 
+  summarise(average_tx_effect = mean(tau))
+```
+
+You call this the *sample average treatment effect* (SATE), which may be defined as
+
+$$\tau_\text{SATE} = \frac{1}{n} \sum_{i = 1}^n (y_i^1 - y_i^0).$$
+
+We can also compute the SATE by subtracting the average of the $y_i^0$ values from the average of the $y_i^1$ values.
+
+```{r}
+d %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  summarise(y0_bar = mean(y0, na.rm = T),
+            y1_bar = mean(y1, na.rm = T)) %>% 
+  mutate(sate = y1_bar - y0_bar)
+```
 
 ### 18.2.2 Conditional average treatment effect (CATE).
 
@@ -124,23 +147,42 @@ d %>%
   summarise(mean_tx_effect = mean(y))
 ```
 
+Within the context of a regression model, you can also compute these for continuous variables and for combinations of several variables.
+
 ### 18.2.3 Population average treatment effect (PATE).
 
 Going beyond the sample, the *population average treatment effect* (PATE) may be defined as
 
-$$\tau_\text{PATE} = \frac{1}{N} \sum_{i = 1}^N (y_i^1 = y_i^0).$$
+$$\tau_\text{PATE} = \frac{1}{N} \sum_{i = 1}^N (y_i^1 - y_i^0),$$
 
-From the PATE perspective, we now have missing data for (a) the counterfactual values within our sample and (b) all potential outcomes for those within the population but not in our sample.
+which is the same as the $\tau_\text{SATE}$, but with $N$ rather than $n$. From the PATE perspective, we now have missing data for (a) the counterfactual values within our sample and (b) all potential outcomes for those within the population but not in our sample.
 
 ### 18.2.4 Problems with self-selection into treatment groups.
 
-You can run into problems when experimental groups are not balances on all relevant variables. For example, our two `treatment` differ substantially by their average `age`.
+You can run into problems when experimental groups are not balanced on all relevant variables. For example, our two `treatment` differ substantially by their average `age`.
 
 ```{r, message = F}
 d %>% 
   group_by(treatment) %>% 
   summarise(mean_age = mean(age))
 ```
+
+As a consequence of this and other similar randomization issues, the true SATE will differ from the observed SATE.
+
+```{r}
+d %>% 
+  mutate(y0 = rep(14:17 * 10, each = 2),
+         y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+  mutate(tau = y1 - y0) %>% 
+  summarise(true_sate = mean(tau))
+
+
+d %>% 
+  summarise(y0_bar = mean(y0, na.rm = T),
+            y1_bar = mean(y1, na.rm = T)) %>% 
+  mutate(observed_sate = y1_bar - y0_bar)
+```
+
 
 ### 18.2.5 Using design and analysis to address imbalance and lack of overlap between treatment and control groups.
 
@@ -164,6 +206,14 @@ set.seed(18)
 sample(0:1, size = 8, replace = T)
 ```
 
+Or also this.
+
+```{r}
+set.seed(18)
+
+sample(rep(0:1, each = 4), size = 8, replace = F)
+```
+
 ### 18.3.1 Completely randomized experiments.
 
 "In a *completely randomized experiment*, the probability of being assigned to the treatment is the same for each unit in the sample" (p. 345, *emphasis* in the original).
@@ -180,7 +230,7 @@ d %>%
   mutate(y = ifelse(treatment == 0, y0, y1))
 ```
 
-Granted the values, above, here would be our estimate of $\tau$.
+Granted the values, above, here would be our $\tau_\text{SATE}$ value.
 
 ```{r, message = F}
 d %>% 
@@ -194,7 +244,7 @@ d %>%
   mutate(tau = `1` - `0`)
 ```
 
-We could also estimate this with the regression model $y_i = a + \tau z_i + \text{error}_i$.
+We could also estimate this with the regression model $y_i = a + \tau z_i + \text{error}_i$. However, the estimand from such a model would be better thought of as a $\tau_\text{PATE}$.
 
 #### 18.3.1.2 A less idealized randomized result.
 
@@ -207,6 +257,7 @@ d %>%
          y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
   mutate(y = ifelse(treatment == 0, y0, y1))
 ```
+
 Now `treatment` groups still differ notably by `age`.
 
 ```{r, message = F}
@@ -233,7 +284,60 @@ d %>%
   mutate(tau = `1` - `0`)
 ```
 
+In another way of speaking, out $\tau_\text{SATE}$ is a biased estimator of the $\tau_\text{PATE}$.
+
 ## 18.4 Sampling distributions, randomization distributions, and bias in estimation
+
+The authors suggested an alternative way to think about sampling distributions is to suppose we had all the true values for $y_i^0$, $y_i^1$, and the relevant baseline covariates in our sample, and we randomly assigned participants to receive either treatment or control again and again, each time computing the estimate for $\tau$ conditional on their observed treatment. Here's a simulation function which can do just that.  
+
+```{r}
+sim_tau <- function(seed){
+  
+  set.seed(seed)
+  
+  d %>% 
+    mutate(treatment = sample(rep(0:1, each = 4), size = 8, replace = F)) %>% 
+    mutate(y0 = rep(14:17 * 10, each = 2),
+           y1 = rep(c(27:28, 31:32) * 5, each = 2)) %>% 
+    mutate(y = ifelse(treatment == 0, y0, y1)) %>% 
+    group_by(treatment) %>% 
+    summarise(y = mean(y)) %>% 
+    pivot_wider(names_from = treatment, values_from = y) %>% 
+    mutate(tau = `1` - `0`) %>% 
+    pull(tau)
+  
+}
+
+# how does it work?
+sim_tau(seed = 1)
+```
+
+Run the simulation 1,000 times.
+
+```{r 17.22849_secs}
+sim1 <- tibble(k = 1:1000) %>% 
+  mutate(tau = map_dbl(k, sim_tau))
+```
+
+This simulation took about 20 seconds on my laptop. Anyway, here's our sampling distribution for the $\tau_\text{SATE}$.
+
+```{r}
+sim1 %>% 
+  ggplot(aes(x = tau)) +
+  geom_histogram(binwidth = 1) +
+  labs(title = expression("Randomization distribution for "*tau[SATE]),
+       x = expression(tau[italic(k)]))
+```
+
+Here are the descriptive statistics.
+
+```{r}
+sim1 %>% 
+  summarise(mean = mean(tau),
+            sd = sd(tau))
+```
+
+Happily, the mean of our sampling distribution is the true value -7.5. Thus, the estimator is unbiased. The standard deviation for the sampling distribution is how we assess the efficiency. It's hard to assess this in the abstract, but an $\textit{SD}$ of that size in this context is a little large, suggesting we have an inefficient estimator of $\tau$. Given our tiny $N = 8$ design, this should be of no surprise.
 
 > When considering the population average treatment effect, we can conceptualize drawing a random sample of size $n_1$ from a population to receive the treatment, drawing a random sample of size $n_0$ from the same population to receive the control, and taking the difference between the average response in each as an estimate of the population average treatment effect. If this were done over and over, the estimates would form a sampling distribution for this estimate. For the estimate to be unbiased, we would need the mean of this sampling distribution to be centered on the true $\tau_\text{PATE}$. A stricter criterion that would also lead to an unbiased treatment effect estimate would require the sampling distributions of the mean of $y$ for the control and treated units to be centered on the population average of $y_0$ and the population average of $y_1$, respectively.
 >
@@ -260,7 +364,15 @@ d <-
 d
 ```
 
-Now the overall sample estimate for $\tau$ is biased.
+Now the "number of treated units is no longer equal to the number of control units within each [age] block" (p. 347). We can shake this out with `count()`. The last `pivot_wider()` line just reformats the output.
+
+```{r}
+d %>% 
+  count(age, treatment) %>% 
+  pivot_wider(names_from = age, values_from = n)
+```
+
+As a consequence, the overall sample estimate for $\tau$ is biased.
 
 ```{r, message = F}
 d %>% 
@@ -292,26 +404,28 @@ d %>%
   summarise(tau = mean(tau_j))
 ```
 
+More formally, this was
+
+$$
+\tau_\text{SATE} = \sum_j n_j \hat \tau_j \Big / \sum_j n_j.
+$$
+
 You can also get an unbiased estimate by fitting the model
 
 $$y_i = a + \tau_\text{RB} z_i + \gamma_1 b_{1i} + \gamma_2 b_{2i} + \gamma_3 b_{3i} + \text{error}_i,$$
 
-where $\tau_\text{RB}$ is the focal parameter, the treatment effect given a random block design. The $a$ parameter is the typical intercept, and the three $\gamma$ parameters denote the deviations based on the block dummies. Here's how to fit the model with **brms**.
+where $\tau_\text{RB}$ is the focal parameter, and the treatment effect given a random block design. The $a$ parameter is the typical intercept, and the three $\gamma$ parameters denote the deviations based on the block dummies. Here's how to fit the model with *`lm()`.
 
 ```{r m18.1, warning = F, message = F}
-library(brms)
-
 m18.1 <-
-  brm(data = d,
-      y ~ 1 + treatment + factor(age),
-      seed = 18,
-      file = "fits/m18.01")
+  lm(data = d,
+     y ~ 1 + treatment + factor(age))
 ```
 
 Check the model summary.
 
 ```{r}
-print(m18.1)
+summary(m18.1)
 ```
 
 The parameter in the `treatment` line is our causal effect, $\tau_\text{RB}$.
@@ -320,7 +434,7 @@ The parameter in the `treatment` line is our causal effect, $\tau_\text{RB}$.
 
 #### 18.5.1.2 Defining blocks in practice.
 
-> How do we choose blocks when our goal is to increase statistical efficiency? The goal when creating blocks is to minimize the variation of each type of potential outcome, $y^0$ and $y^1$, within the block. (p. 349)
+> How do we choose blocks when our goal is to increase statistical efficiency? The goal when creating blocks is to minimize the variation of each type of potential outcome, $y^0$ and $y^1$, within the block... In practice researchers only have access to observed pre-treatment variables when making decisions regarding how to define blocks... To the extent possible, the predictors used to define the blocks should be those that are believed to be predictive of the outcome based on either theory or on results from previous studies. (p. 349)
 
 ### 18.5.2 Matched pairs experiments.
 
@@ -344,11 +458,13 @@ Though blocking is sometimes more efficient than pure randomization, cluster ran
 
 #### 18.6.1.1 Completely randomized experiments.
 
-"In a completely randomized design, the treatment assignment is a random variable that is independent of the potential outcomes" (p. 350). This implies that there will be no difference, on average, in potential outcomes across repeated randomizations, a condition called *ignorability*.
+"In a completely randomized design, the treatment assignment is a random variable that is independent of the potential outcomes" (p. 350). This implies that there will be no difference, on average, in potential outcomes across repeated randomizations, a condition called *ignorability*. We can express this as $z \perp y^0, y^1$.
+
+> Another important property of randomized experiments is that they create independence between treatment assignment and all variables $x$ that occur before treatment assignment, so that $x \perp z$. In general, the relevant cutoff time is when the treatment is *assigned*, not when it is *implemented*, because people can adjust their behavior based on the anticipation of a treatment to which they have been assigned. (p. 351, *emphasis* in the original)
 
 #### 18.6.1.2 Randomized blocks experiments.
 
-"When we randomize within blocks, the independence between potential outcomes and the treatment variable holds only conditional on block membership, $w$" (p. 351).
+"When we randomize within blocks, the independence between potential outcomes and the treatment variable holds only conditional on block membership, $w$" (p. 351). We can express this formally as $z \perp y^0, y^1 | w$. "Intuitively, we can think of a randomized block experiment as a collection of experiments, each of which is performed within the members of a specific block" (p. 351). The implication is we want to include $w$ as a covariate in the primary data analysis.
 
 #### 18.6.1.3 Matched pairs experiments.
 
@@ -397,43 +513,47 @@ y_i & \sim \operatorname N(\mu_i, \sigma) \\
 \end{align*}
 $$
 
-Though they didn't show example code fitting these in the text, here we fit them with **brms**.
-
+Though they didn't show example code fitting these in the text, here we fit them with `lm()`.
 
 ```{r m18.2, warning = F, message = F}
 m18.2 <-
-  brm(data = d,
-      y ~ 1 + treatment,
-      seed = 18,
-      file = "fits/m18.02")
+  lm(data = d,
+     y ~ 1 + treatment)
 
 m18.3 <-
-  brm(data = d,
-      y ~ 1 + treatment + female + age,
-      seed = 18,
-      file = "fits/m18.03")
+  lm(data = d,
+     y ~ 1 + treatment + female + age)
 ```
 
-Check the model summary.
+Compare the model summaries.
 
 ```{r}
-print(m18.2, robust = T)
-print(m18.3, robust = T)
+summary(m18.2)
+summary(m18.3)
 ```
 
-The posterior mad sd values for our $\tau$ parameters are a little larger than those listed in the text. Let's compare what we get when fitting the models with OLS.
+Note how the standard error values for `treatment` are right in line with the values discussed in the bottom of page 352 in the text. Importantly, this highlights the advantage of high-quality covariates when analyzing RCT data. They shrink the standard error for the focal parameter $\tau$. To get a full sense of the magnitude of the shrinkage, we might look at a coefficient plot.
 
-```{r}
-lm(data = d,
-   y ~ 1 + treatment) %>% 
-  summary()
+```{r, fig.width = 5, fig.height = 1.5, warning = F, message = F}
+library(broom)
 
-lm(data = d,
-   y ~ 1 + treatment + female + age) %>% 
-  summary()
+bind_rows(
+  tidy(m18.2, conf.int = T),
+  tidy(m18.3, conf.int = T)
+) %>% 
+  filter(term == "treatment") %>% 
+  mutate(covariates = c("no", "yes")) %>% 
+  
+  ggplot(aes(x = estimate, xmin = conf.low, xmax = conf.high, y = covariates)) +
+  geom_vline(xintercept = -7.5, color = "white") +
+  geom_pointrange() +
+  scale_x_continuous(expression(tau[PATE]), expand = expansion(mult = 0.2),
+                     breaks = c(-20, -7.5, 0, 20), labels = c("-20", -7.5, "0", "20")) +
+  ylab("covariates?") +
+  theme(panel.grid = element_blank())
 ```
 
-This time, the standard errors do match those in the text. *What gives?* With only eight data points, the likelihoods are very weak and our **brms** models are using default flat priors for the parameters of `class = b`. Yet across all four models, the point estimate for $\tau$ hovered consistently around the true value -7.5.
+In this case, the shrinkage was particularly extreme because of the tiny sample size.
 
 ### 18.6.3 Stable unit treatment value assumption (SUTVA): no interference among units and no hidden versions of the treatment.
 
