@@ -18,15 +18,17 @@ knitr::opts_chunk$set(fig.align = "center")
 
 # Causal inference using regression on the treatment variable
 
-> This chapter illustrates the use of regression in the setting of controlled experiments, going through issues of adjustment for pre-treatment predictors, interactions, and pitfalls that can arise when building a regression using experimental data and interpreting coefficients causally. (p. 363)
+> In the usual regression context, predictive inference relates to comparisons *between* units, whereas causal inference addresses comparisons of different treatments if applied to the *same* units. More generally, causal inference can be viewed as a special case of prediction in which the goal is to predict what *would have happened* under different treatment options... This chapter illustrates the use of regression in the setting of controlled experiments, going through issues of adjustment for pre-treatment predictors, interactions, and pitfalls that can arise when building a regression using experimental data and interpreting coefficients causally. (p. 363, *emphasis* in the original)
 
 ## 19.1 Pre-treatment covariates, treatments, and potential outcomes
 
-Three kinds of data are
+In the context of this chapter, the three kinds of data are
 
 * pre-treatment measurements (*covariates*),
 * treatment status ($z_i$), and
-* potential outcomes ($y_i$).
+* the primary outcomes ($y_i$).
+
+In the context of the primary outcomes, the $y_i$ values are observed, and the $y_i^0$ and $y_i^1$ values are the *potential outcomes*. Even in the best of cases, only up to 50% of the potential outcomes are observed in a given study.
 
 ## 19.2 Example: the effect of showing children an educational television show
 
@@ -40,6 +42,8 @@ electric <- read_csv("ROS-Examples-master/ElectricCompany/data/electric.csv")
 
 head(electric)
 ```
+
+Note these values are all at the classroom level. Student-level data are not available.
 
 ### 19.2.1 Displaying the data two different ways.
 
@@ -60,8 +64,8 @@ electric %>%
                             labels = c("control", "treatment"))) %>% 
   
   # plot
-  ggplot(aes(x = time, y = score, group = X1, color = treatment)) +
-  geom_line(size = 1/6) +
+  ggplot(aes(x = time, y = score, group = ...1, color = treatment)) +
+  geom_line(linewidth = 1/6) +
   scale_color_viridis_d(option = "A", end = .67, breaks = NULL) +
   scale_x_continuous(NULL, limits = c(-0.2, 1.2), 
                      breaks = 0:1, labels = c("pre_test", "post_test")) +
@@ -103,7 +107,7 @@ electric %>%
   # plot
   ggplot(aes(x = post_test)) +
   geom_histogram(boundary = 0, binwidth = 5,
-                 fill = "grey75", color = "black", size = 1/4) +
+                 fill = "grey75", color = "black", linewidth = 1/4) +
   geom_text(data = text,
             aes(y = count, label = label),
             hjust = 0) +
@@ -142,16 +146,27 @@ electric %>%
   # plot
   ggplot(aes(x = post_test)) +
   geom_histogram(boundary = 0, binwidth = 5,
-                 fill = "grey75", color = "black", size = 1/4) +
+                 fill = "grey75", color = "black", linewidth = 1/4) +
   geom_vline(data = vline,
              aes(xintercept = mean),
-             size = 1, color = "royalblue") +
+             linewidth = 1, color = "royalblue") +
   scale_x_continuous(NULL, breaks = 2:4 * 25, 
                      limits = c(40, 125), expand = c(0, 0)) +
   scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
   theme(axis.ticks.x = element_blank()) +
   facet_grid(treatment~grade)
 ```
+
+The plots suggest there might be some kind of ceiling effect, particularly for the higher grades. Here are the maximum values, by `grade`, for both pre- and post-test measures.
+
+```{r}
+electric %>% 
+  group_by(grade) %>% 
+  summarize(max_post = max(post_test),
+            max_pre = max(pre_test))
+```
+
+Presumably there was a maximum value for the tests, but it's not totally clear what that was based on the data we have in hand. However, if we did have the student-level data, we might switch to some kind of binomial or ordinal model framework.
 
 ### 19.2.2 Paired comparisons design.
 
@@ -162,7 +177,7 @@ electric %>%
   count(pair_id)
 ```
 
-However, Gelman et al adopted to keep things simple and analyze these data without accounting for this pairing.
+However, Gelman et al opted to keep things simple and analyze these data without accounting for this pairing.
 
 ### 19.2.3 Simple difference estimate (equivalently, regression on an indicator for treatment), appropriate for a completely randomized experiment with no pre-treatment variables.
 
@@ -170,7 +185,7 @@ We start by fitting the simple model
 
 $$
 \begin{align*}
-\text{post_test}_i & \sim \operatorname N(\mu_i, \sigma) \\
+\text{post_test}_i & \sim \operatorname{N}(\mu_i, \sigma) \\
 \mu_i & = a + b\ \text{treatment}_i.
 \end{align*}
 $$
@@ -202,6 +217,25 @@ Check the model summary.
 print(m19.1, robust = T)
 ```
 
+Using some of the terms in this section of the text, here are the three potential-outcomes estimands we can pull from this model's posterior draws.
+
+```{r, fig.width = 6.5, fig.height = 2.75, warning = F}
+as_draws_df(m19.1) %>% 
+  transmute(mu0 = b_Intercept,
+            mu1 = b_Intercept + b_treatment) %>% 
+  mutate(tau = mu1 - mu0) %>% 
+  pivot_longer(everything()) %>% 
+  mutate(name = factor(name, 
+                       levels = c("mu0", "mu1", "tau"), 
+                       labels = c("avg(italic(y)^0)", "avg(italic(y)^1)", "bar(italic(y))[1]-bar(italic(y))[0]"))) %>% 
+  
+  ggplot(aes(x = value)) +
+  geom_histogram(binwidth = 0.5) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab("estimand") +
+  facet_wrap(~ name, scales = "free_x", labeller = label_parsed)
+```
+
 ### 19.2.4 Separate analysis within each grade.
 
 To serially fit the model individually by `grade`, we'll use the `purrr::map()` approach to iteration.
@@ -209,7 +243,7 @@ To serially fit the model individually by `grade`, we'll use the `purrr::map()` 
 ```{r m19.1a, results = "hide", message = F}
 fits1 <-
   electric %>% 
-  nest(data = c(X1, post_test, pre_test, treatment, supp, pair_id)) %>% 
+  nest(data = c(...1, post_test, pre_test, treatment, supp, pair_id)) %>% 
   mutate(fit = map(data, ~update(m19.1,
                                  newdata = .,
                                  seed = 19)))
@@ -220,20 +254,37 @@ Here's how we might work with output to make the left panel of Figure 19.4.
 ```{r, fig.width = 4, fig.height = 1.75}
 p1 <-
   fits1 %>% 
-  mutate(post = map(fit, posterior_samples)) %>% 
+  mutate(post = map(fit, as_draws_df)) %>% 
   select(-data, -fit) %>% 
   unnest(post) %>% 
   mutate(grade = factor(str_c("Grade ", grade),
                         levels = str_c("Grade ", 4:1))) %>% 
   
   ggplot(aes(x = b_treatment, y = grade)) +
-  geom_vline(xintercept = 0, linetype = 2, size = 1/4) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1/4) +
   stat_pointinterval(.width = c(.5, .95)) +
   scale_x_continuous("Regression on treatment indicator", position = "top") +
   ylab("Subpopulation") +
   theme(axis.ticks.y = element_blank())
 
 p1
+```
+
+"Sample sizes are approximately the same in each of the grades, but the estimates for higher grades have lower standard errors because the residual standard deviations of the regressions are lower in these grades" (p. 367). We might look at that in a coefficient plot, too.
+
+```{r, fig.width = 4, fig.height = 1.75}
+fits1 %>% 
+  mutate(post = map(fit, as_draws_df)) %>% 
+  select(-data, -fit) %>% 
+  unnest(post) %>% 
+  mutate(grade = factor(str_c("Grade ", grade),
+                        levels = str_c("Grade ", 4:1))) %>% 
+  
+  ggplot(aes(x = sigma, y = grade)) +
+  stat_pointinterval(.width = c(.5, .95)) +
+  scale_x_continuous(expression(error[italic(i)]*" (i.e., "*sigma*")"), position = "top") +
+  ylab("Subpopulation") +
+  theme(axis.ticks.y = element_blank())
 ```
 
 ## 19.3 Including pre-treatment predictors
@@ -244,7 +295,7 @@ Now we'll fit the following model
 
 $$
 \begin{align*}
-\text{post_test}_i & \sim \operatorname N(\mu_i, \sigma) \\
+\text{post_test}_i & \sim \operatorname{N}(\mu_i, \sigma) \\
 \mu_i & = a + b\ \text{treatment}_i + \text{pre_test}_i,
 \end{align*}
 $$
@@ -254,7 +305,7 @@ separately by `grade`, where the treatment effect is conditioned on `pre_test` s
 ```{r m19.1b, results = "hide", message = F}
 fits2 <-
   electric %>% 
-  nest(data = c(X1, post_test, pre_test, treatment, supp, pair_id)) %>% 
+  nest(data = c(...1, post_test, pre_test, treatment, supp, pair_id)) %>% 
   mutate(fit = map(data, ~update(m19.1,
                                  newdata = .,
                                  formula = post_test ~ treatment + pre_test,
@@ -266,14 +317,14 @@ Now make the complete version of Figure 19.4.
 ```{r, fig.width = 8, fig.height = 2}
 p2 <-
   fits2 %>% 
-  mutate(post = map(fit, posterior_samples)) %>% 
+  mutate(post = map(fit, as_draws_df)) %>% 
   select(-data, -fit) %>% 
   unnest(post) %>% 
   mutate(grade = factor(str_c("Grade ", grade),
                         levels = str_c("Grade ", 4:1))) %>% 
   
   ggplot(aes(x = b_treatment, y = grade)) +
-  geom_vline(xintercept = 0, linetype = 2, size = 1/4) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1/4) +
   stat_pointinterval(.width = c(.5, .95)) +
   scale_x_continuous("Regression on treatment indicator,\ncontrolling for pre", position = "top") +
   scale_y_discrete(NULL, breaks = NULL) +
@@ -285,7 +336,7 @@ library(patchwork)
   coord_cartesian(xlim = c(-3.8, 17))
 ```
 
-Now the treatment effects, $\theta$, are more orderly and precise. Before we make our version of Figure 19.5, we'll want to summarize the posteriors by the intercept and slopes, with respect to `pre_test`.
+Now the treatment effects, $\theta$, are more orderly AND, importantly, they're more precise. Before we make our version of Figure 19.5, we'll want to summarize the posteriors by the intercept and slopes, with respect to `pre_test`.
 
 ```{r}
 abline <-
@@ -317,7 +368,7 @@ electric %>%
   ggplot(aes(x = pre_test, y = post_test)) +
   geom_abline(data = abline,
               aes(intercept = intercept, slope = slope, linetype = treatment),
-              size = 1/4) +
+              linewidth = 1/4) +
   geom_point(aes(fill = treatment),
              shape = 21, stroke = 1/4) +
   scale_linetype_manual(values = 2:1, breaks = NULL) +
@@ -329,7 +380,15 @@ electric %>%
   facet_wrap(~grade, nrow = 1)
 ```
 
-The big difference in slopes for first grade versus all other grades is the pre-test measure was based on a subset of the post-test questions.
+The big difference in slopes for first grade versus all other grades is the pre-test measure was based on a subset of the post-test questions. In case you were curious, there are the correlations for the pre- and post-test scores, by `grade`.
+
+```{r}
+electric %>% 
+  group_by(grade) %>% 
+  summarise(r = cor(pre_test, post_test))
+```
+
+High correlations like that are what makes `pre_test` such a great covariate. Higher correlations make for greater shrinkage of the standard error for the averaege treatment effect $\theta$.
 
 ### 19.3.2 Benefits of adjusting for pre-treatment score.
 
@@ -341,7 +400,7 @@ The big difference in slopes for first grade versus all other grades is the pre-
 
 ### 19.3.4 Gain scores: a special case of regression in which the coefficient for pre-test is fixed at 1.
 
-We can compute a gain score ($g_i$) by subtracting the pre-intervention score (x_i) from the post-intervention score ($y_i$), 
+We can compute a *gain score* ($g_i$) by subtracting the pre-intervention score ($x_i$) from the post-intervention score ($y_i$), 
 
 $$g_i = y_i - x_i.$$
 
@@ -371,12 +430,14 @@ electric %>%
   # plot
   ggplot(aes(x = gain)) +
   geom_histogram(boundary = 0, binwidth = 2.5,
-                 fill = "grey75", color = "black", size = 1/4) +
+                 fill = "grey75", color = "black", linewidth = 1/4) +
   scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
   xlab("gain score") +
   theme(axis.ticks.x = element_blank()) +
   facet_grid(treatment~grade)
 ```
+
+Here we've left out the first grade, because the pre-test was not directly comparable to the post-test.
 
 To practice the gain score approach, here we'll fit the model
 
@@ -422,7 +483,7 @@ electric %>%
   summarise(tau_hat = `1` - `0`)
 ```
 
-However, 
+It's very close. However, 
 
 > one perspective on the analysis of gain scores is that it implicitly makes an unnecessary assumption, namely, that $\beta = 1$ in model (19.1). To see this, note the algebraic equivalence between $y_i = \alpha + \tau z_i + x_i + \text{error}_i$ and $y_i - x_i= \alpha + \tau z_i + \text{error}_i$. On the other hand, if this assumption is close to being true, then $\tau$ may be estimated more precisely. (p. 369)
 
@@ -519,32 +580,33 @@ conditional_effects(m19.6, effects = "treatment:pre_test")
 By default, `conditional_effects()` depicts interactions based on the mean and the mean $\pm 1$ standard deviation of the second variable in the interaction term, which is `pre_test`, in this case.
 
 ```{r}
-post <- posterior_samples(m19.6) 
+draws <- as_draws_df(m19.6) 
 
-post %>% 
-  expand(nesting(b_treatment, `b_treatment:pre_test`),
-         pre_test = c(80, 120)) %>% 
+draws %>% 
+  expand_grid(pre_test = c(80, 120)) %>% 
   mutate(tau_hat = b_treatment + `b_treatment:pre_test` * pre_test) %>% 
   group_by(pre_test) %>% 
   median_qi(tau_hat) %>% 
   mutate_if(is.double, round, digits = 2)
 ```
 
-Our estimates don't look quite like the point estimates presented in the middle of pate 317. However, if you look at the `.lower` and `.upper` columns, you'll see there's massive uncertainty in those posteriors. It might be easier to appreciate this with a coefficient plot.
+Our posterior medians don't look quite like the point estimates presented in the middle of page 371. However, if you look at the `.lower` and `.upper` columns, you'll see there's massive uncertainty in those posteriors. It might be easier to appreciate this with a coefficient plot.
 
 ```{r, fig.width = 4.5, fig.height = 1.5}
-post %>% 
-  expand(nesting(b_treatment, `b_treatment:pre_test`),
-         pre_test = c(80, 120)) %>% 
+draws %>% 
+  expand_grid(pre_test = c(80, 120)) %>% 
   mutate(tau_hat = b_treatment + `b_treatment:pre_test` * pre_test) %>% 
   
   ggplot(aes(x = tau_hat, y = factor(pre_test))) +
+  # values from the text
   geom_vline(xintercept = c(4.4, 0.8),
-             color = "royalblue", linetype = 2, size = 1/4) +
+             color = "royalblue", linetype = 2, linewidth = 1/4) +
   stat_pointinterval(.width = c(.5, .95)) +
   labs(x = expression(hat(tau)),
        y = "pre_test")
 ```
+
+The dashed blue lines mark the point estimates from the text.
 
 We can also examine this with `conditional_effects()`, where we can specify our desired `pre_test` values with the `int_conditions` argument.
 
@@ -556,19 +618,39 @@ conditional_effects(m19.6,
 
 We can get a further sense of the variability in $\hat \tau$ by making our version of Figure 19.7.
 
+```{r}
+draws %>% 
+  expand_grid(pre_test = c(70, 130)) %>% 
+  mutate(tau_hat = b_treatment + `b_treatment:pre_test` * pre_test) %>% 
+  group_by(pre_test) %>% 
+  summarise(tau_hat = median(tau_hat))
+```
+
+
+
+
 ```{r, fig.width = 3.5, fig.height = 2}
+# select a random subset of .draw values
 set.seed(19)
 
-post %>% 
-  mutate(iter = 1:n()) %>% 
+random_draws <- draws %>% 
   slice_sample(n = 20) %>% 
-  expand(nesting(b_treatment, `b_treatment:pre_test`, iter),
-         pre_test = c(70, 130)) %>% 
+  pull(.draw)
+
+draws %>% 
+  expand_grid(pre_test = c(70, 130)) %>% 
   mutate(tau_hat = b_treatment + `b_treatment:pre_test` * pre_test) %>% 
   
-  ggplot(aes(x = pre_test, y = tau_hat, group = iter)) +
-  geom_line(size = 1/2, alpha = 1/2) +
-  geom_hline(yintercept = 0, linetype = 2, size = 1/4, color = "grey50") +
+  ggplot(aes(x = pre_test, y = tau_hat)) +
+  geom_line(data = . %>% 
+              filter(.draw %in% random_draws),
+            aes(group = .draw),
+            linewidth = 1/2, alpha = 1/2) +
+  geom_line(data = . %>% 
+              group_by(pre_test) %>% 
+              summarise(tau_hat = median(tau_hat)),
+            linewidth = 2) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1/4, color = "grey50") +
   labs(subtitle = "treatment effect in grade 4",
        x = "pre-test",
        y = "treatment effect") +
@@ -576,7 +658,24 @@ post %>%
                   ylim = c(-5, 10))
 ```
 
-We randomly selected the 20 posterior draws by way of `set.seed()` and `slice_sample()`.
+The thinner lines are a random subset of the posterior draws randomly selected by way of the `set.seed()` and `slice_sample()` functions. The thicker black line is the posterior median. We might express the uncertainty in the varying treatment effect with a line ribbon, instead.
+
+```{r, fig.width = 3.5, fig.height = 2}
+draws %>% 
+  expand_grid(pre_test = seq(from = 70, to = 130, by = 1)) %>% 
+  mutate(tau_hat = b_treatment + `b_treatment:pre_test` * pre_test) %>% 
+  
+  ggplot(aes(x = pre_test, y = tau_hat)) +
+  stat_lineribbon(.width = .95, fill = "grey67") +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1/4, color = "grey50") +
+  labs(subtitle = "treatment effect in grade 4",
+       x = "pre-test",
+       y = "treatment effect") +
+  coord_cartesian(xlim = c(80, 120),
+                  ylim = c(-5, 10))
+```
+
+In this version of the plot, the gray band marks off the 95% interval.
 
 If you only follow along in the text, the bit of code at the top of page 372 can be confusing. The second line includes the bit `sum(grade==4)`, which appears to be summing a subset of the object `grade`. However, none of the prior code in this chapter of the text had us making a `grade` object. This gets clarified in the `/ROS-Examples-master/ElectricCompany/electric.Rmd` file, where we find this.
 
@@ -597,26 +696,29 @@ grade <- pull(electric, grade)
 sum(grade==4)
 ```
 
-That second line is simply counting the number of cells in the vector that satisfy the logical criterion, `grade == 4`. Here's a more **tidyverse**-centric way of computing that value.
+That second line is simply counting the number of cells in the vector that satisfy the logical criterion, `grade == 4`. Here are two more **tidyverse**-centric ways of computing that value.
 
 ```{r}
+# option 1
 electric %>% 
   summarise(sum_grade_4 = sum(grade==4))
+
+# option 2
+electric %>% 
+  filter(grade==4) %>% 
+  nrow()
 ```
 
-Anyway, we can achieve what Gelman et al did with that block of code by working with our `post` object, which, recall, is the result of `posterior_samples()`.
+Anyway, we can achieve what Gelman et al did with that block of code by working with our `draws` object, which, recall, is the result of `as_draws_df()`.
 
 ```{r, message = F}
-post %>% 
-  # add an iteration index (i.e., a row number)
-  mutate(iter = 1:n()) %>% 
+draws %>% 
   # expand the data frame to include the desired pre_test values
-  expand(nesting(iter, b_treatment, `b_treatment:pre_test`),
-         pre_test = filter(electric, grade == 4) %>% pull(pre_test)) %>% 
+  expand_grid(pre_test = filter(electric, grade == 4) %>% pull(pre_test)) %>% 
   # compute the treatment effect
   mutate(effect = b_treatment + `b_treatment:pre_test` * pre_test) %>% 
   # summarize
-  group_by(iter) %>% 
+  group_by(.draw) %>% 
   summarise(avg_effect = mean(effect)) %>% 
   summarise(median = median(avg_effect), 
             mad = mad(avg_effect))
@@ -632,14 +734,37 @@ Yep, that's close.
 
 > In general, for a linear regression model, the estimate obtained by including the interaction, and then averaging over the data, reduces to the estimate with no interaction. The motivation for including the interaction is thus to get a better idea of how the treatment effect varies with pre-treatment predictors, not to simply estimate an average effect. (p. 372)
 
+Also note that what we did 2 blocks up was effectively compute the $\tau_\text{PATE}$ using the "marginal standardization" method, as seen in epidemiology. Here's a **tidybayes** way to do the same.
+
+```{r, fig.width = 4.5, fig.height = 2.75}
+electric %>% 
+  filter(grade == 4) %>% 
+  select(...1, pre_test) %>%
+  expand_grid(treatment = 0:1) %>% 
+  
+  add_epred_draws(m19.6) %>% 
+  ungroup() %>% 
+  select(...1, treatment, .draw, .epred) %>% 
+  pivot_wider(names_from = treatment, values_from = .epred) %>% 
+  mutate(tau = `1` - `0`) %>% 
+  # summarize
+  group_by(.draw) %>% 
+  summarise(avg_effect = mean(tau)) %>% 
+  
+  ggplot(aes(x = avg_effect)) +
+  stat_halfeye(.width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  xlab(expression(tau[PATE]))
+```
+
 #### 19.4.0.1 Bonus: Fit the model 4 times to make the figure
 
-Backing up a bit, since we only fit the interaction mofel for `grade == 4`, we were unprepared to remake Figure 19.6. To make that figure, we'll use the `purrr::map()` approach to iterate fitting the interaction model across each level of `grade`.
+Backing up a bit, since we only fit the interaction model for `grade == 4`, we were unprepared to remake Figure 19.6. To make that figure, we'll use the `purrr::map()` approach to iterate fitting the interaction model across each level of `grade`.
 
 ```{r fits3, results = "hide", message = F}
 fits3 <-
   electric %>% 
-  nest(data = c(X1, post_test, pre_test, treatment, supp, pair_id, gain)) %>% 
+  nest(data = c(...1, post_test, pre_test, treatment, supp, pair_id, gain)) %>% 
   mutate(fit = map(data, ~update(m19.6,
                                  newdata = .,
                                  seed = 19)))
@@ -677,7 +802,7 @@ electric %>%
   ggplot(aes(x = pre_test, y = post_test)) +
   geom_abline(data = abline,
               aes(intercept = intercept, slope = slope, linetype = treatment),
-              size = 1/4) +
+              linewidth = 1/4) +
   geom_point(aes(fill = treatment),
              shape = 21, stroke = 1/4) +
   scale_linetype_manual(values = 2:1, breaks = NULL) +
@@ -693,18 +818,18 @@ We might also want to go beyond point estimates to get a sense of the uncertaint
 
 ```{r, fig.width = 4, fig.height = 2}
 fits3 %>% 
-  mutate(post = map(fit, posterior_samples)) %>% 
+  mutate(post = map(fit, as_draws_df)) %>% 
   select(-data, -fit) %>% 
   unnest(post) %>% 
   mutate(grade = factor(str_c("grade ", grade),
                         levels = str_c("grade ", 4:1))) %>%
   
   ggplot(aes(x = `b_treatment:pre_test`, y = grade)) +
-  geom_vline(xintercept = 0, linetype = 2, size = 1/4) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1/4) +
   stat_halfeye(.width = .95, size = 1) +
   scale_x_continuous("interaction coefficient", position = "top") +
   ylab("subpopulation") +
-  coord_cartesian(ylim = c(1.5, 3.8)) +
+  coord_cartesian(ylim = c(1.5, 3.6)) +
   theme(axis.ticks.y = element_blank())
 ```
 
@@ -713,6 +838,8 @@ fits3 %>%
 > In survey sampling, *stratification* refers to the procedure of dividing the population into disjoint subsets (strata), sampling separately within each stratum, and then combining the stratum samples to get a population estimate. Poststratification is the analysis of an unstratified sample, breaking the data into strata and reweighting as would have been done had the survey actually been stratified. Stratification can adjust for potential differences between sample and population using the survey design; poststratification makes such adjustments in the data analysis. (p. 372, *emphasis* in the original)
 
 ## 19.5 Challenges of interpreting regression coefficients as treatment effects
+
+"It can be tempting to take the coefficients of a fitted regression model and give them a causal interpretation, but this can be a mistake—even if the data come from randomized experiments" (p. 373).
 
 To follow along, load the `incentives.csv` data.
 
@@ -745,7 +872,7 @@ Check the summary.
 print(m19.7, robust = T)
 ```
 
-Our intercept and beta parameters make up the values displayed in the table in Figure 19.8. Even though this model summary comes from values taken from a meta-analysis, Gelman et al still caution us not to interpret them as causal. The crux of their argument is:
+Our intercept and beta parameters make up the values displayed in the table in Figure 19.8 (p. 373). Even though this model summary comes from values taken from a meta-analysis, Gelman et al still caution us not to interpret them as causal. The crux of their argument is:
 
 > The resolution is that, although the incentive conditions were assigned randomly *within* each experiment, the differences in the conditions were not assigned at random *between* experiments. The difference in response rate comparing two incentive conditions within a survey is an unbiased estimate of the effect of that particular implementation of the incentive for that particular survey--but when comparing incentives implemented in different surveys, what we have is an observational study. (p. 374, *emphasis* in the original)
 
@@ -753,7 +880,7 @@ Our intercept and beta parameters make up the values displayed in the table in F
 
 "Naively adjusting for a post-treatment variable can bias the estimate of the treatment effect, *even when the treatment has been randomly assigned to study participants*" (p. 374, *emphasis* in the original).
 
-* y as the child’s IQ score measured 2 years after the treatment regime has been completed, 
+* y as the child's IQ score measured 2 years after the treatment regime has been completed, 
 * q as a continuous parenting quality measure (ranging from 0 to 1) measured one year after treatment completion, 
 * z as the randomly assigned binary treatment, and 
 * x as the pre-treatment measure reflecting whether both parents have a high school education (in general this could be a vector of pre-treatment predictors). 
@@ -838,7 +965,7 @@ print(m19.8, robust = T)
 print(m19.9, robust = T)
 ```
 
-Both `treatment` effects are as expected bases on the text. We have an effect of 10 for those whose parenting styles are not effected by treatment and an effect of 15 for those whose parenting styles were effected. But notice the warning message we get for the second model. This is because we fit a model on data with a purely deterministic relation between the outcome and treatment. Because there was no other source of variability in the data, the $\sigma$ posterior went to zero, which made it rough on the sampler.
+Both `treatment` effects are as expected based on the text. We have an effect of 10 for those whose parenting styles are not effected by treatment and an effect of 15 for those whose parenting styles were effected. But notice the warning message we get for the second model. This is because we fit a model on data with a purely deterministic relation between the outcome and treatment. Because there was no other source of variability in the data, the $\sigma$ posterior went to zero, which made it rough on the sampler.
 
 #### 19.7.2.2 A regression adjusting for the intermediate outcome does not generally work.
 
