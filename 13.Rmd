@@ -204,9 +204,9 @@ $$
 
 where the first line indicates we're modeling the criterion variable with the binomial likelihood (typical with logistic regression). The binomial likelihood has two arguments, $n$, which tells us how many trials each case is our of, and $p$, which is the probability of a 1 within a given trial. When the criterion variable is a series of 0's and 1's, $n$ is fixed to 1. If we take our focus from the binomial likelihood function, we might express the model as
 
-$$\operatorname{Pr}(\text{rvote}_i = 1) = \operatorname{logit}^{-1}(a + b\ \text{income}_i),$$
+$$\Pr(\text{rvote}_i = 1) = \operatorname{logit}^{-1}(a + b\ \text{income}_i),$$
 
-which Gelman et al more generically expressed as $\operatorname{Pr}(y_i = 1) = \operatorname{logit}^{-1}(X_i \beta)$. Since $\operatorname{Pr}(y_i = 1) = p_i$, we can also write the generic model as 
+which Gelman et al more generically expressed as $\Pr(y_i = 1) = \operatorname{logit}^{-1}(X_i \beta)$. Since $\Pr(y_i = 1) = p_i$, we can also write the generic model as 
 
 $$\operatorname{logit}(p_i) = X_i \beta,$$
 
@@ -317,7 +317,7 @@ invlogit(fixef(m13.1, robust = T)[1, 1] + fixef(m13.1, robust = T)[2, 1] * 3) - 
 
 ### 13.2.2 The divide-by-4 rule.
 
-> The logistic curve is steepest at its center, at which point $\alpha + \beta x = 0$ so that $\operatorname{logit}^{-1}(\alpha + \beta x) = 0.5$; see Figure 13.1. The slope of the curve--the derivative of the logistic function--is maximized at this point and attains the value $\beta e^0 / (1 + e^0)^2 = \beta / 4$. Thus, $\beta / 4$ is the maximum difference in $\operatorname{Pr}(y = 1)$ corresponding to a unit difference in $x$.
+> The logistic curve is steepest at its center, at which point $\alpha + \beta x = 0$ so that $\operatorname{logit}^{-1}(\alpha + \beta x) = 0.5$; see Figure 13.1. The slope of the curve--the derivative of the logistic function--is maximized at this point and attains the value $\beta e^0 / (1 + e^0)^2 = \beta / 4$. Thus, $\beta / 4$ is the maximum difference in $\Pr(y = 1)$ corresponding to a unit difference in $x$.
 >
 > As a rule of convenience, we can take logistic regression coefficients (other than the constant term) and divide them by 4 to get an upper bound of the predictive difference corresponding to a unit difference in $x$. This upper bound is a reasonable approximation near the midpoint of the logistic curve, where probabilities are close to 0.5. (p. 220)
 
@@ -636,7 +636,7 @@ str(postpred)
 
 Whereas `pred` contains one summary *row* for each $X^\text{new}$ value, the other three objects contain one *column* of posterior draws for each $X^\text{new}$ value.
 
-We might use `epred` to see how many of our posterior draws support the hypothesis $\operatorname{Pr} (y^\text{new} | \text{income} = 5) > \operatorname{Pr} (y^\text{new} | \text{income} = 4)$.
+We might use `epred` to see how many of our posterior draws support the hypothesis $\Pr (y^\text{new} | \text{income} = 5) > \Pr (y^\text{new} | \text{income} = 4)$.
 
 ```{r}
 epred %>% 
@@ -926,9 +926,9 @@ With latent-variable formulation,
 > 
 > with independent errors $\epsilon_i$ that have the *logistic* probability distribution. The logistic distribution is shown in Figure 13.5 and is defined so that
 > 
-> $$\operatorname{Pr}(\epsilon_i < x) = \operatorname{logit}^{-1} (x)\ \text{for all}\ x.$$
+> $$\Pr(\epsilon_i < x) = \operatorname{logit}^{-1} (x)\ \text{for all}\ x.$$
 > 
-> Thus, $\operatorname{Pr}(y_i = 1) = \operatorname{Pr}(z_i > 0) = \operatorname{Pr}(\epsilon_i > -X_i \beta) = \operatorname{logit}^{-1}(X_i \beta)$. (p. 226, *emphasis* in the original)
+> Thus, $\Pr(y_i = 1) = \Pr(z_i > 0) = \Pr(\epsilon_i > -X_i \beta) = \operatorname{logit}^{-1}(X_i \beta)$. (p. 226, *emphasis* in the original)
 
 We can plot the logistic density function of Figure 13.5 with aid from the `dlogis()` function.
 
@@ -1196,11 +1196,13 @@ The two have nearly converged. "In this particular example, once $n$ is as large
 
 > Consider the following scenario: We fit a logistic regression model with estimated parameters $\hat \beta$ and apply it to $n^\text{new}$ new data points with predictor matrix $X^\text{new}$, thus yielding a vector of predictive probabilities $p^\text{new} = \operatorname{logit}^{-1}(X_i^\text{new}, \hat \beta)$. We then find out the outcomes $y^\text{new}$ for the new cases and evaluate the model fit using
 > 
+> $$
 > \text{out-of-sample log score} = \sum_{i = 1}^{n^\text{new}} \left \{
 >   \begin{array}{@{}ll@{}}
 >     \log p_i^\text{new} & \text{if}\ y^\text{new} = 1 \\
 >     \log (1 - p_i^\text{new}) & \text{if}\ y^\text{new} = 0.
 >   \end{array} \right.
+> $$
 > 
 > The same idea applies more generally to any statistical model: the predictive log score is the sum of the logarithms of the predicted probabilities of each data point. 
 > 
