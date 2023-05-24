@@ -89,9 +89,9 @@ p1 <-
              size = 3/4) +
   geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5),
               alpha = 1/4) +
-  geom_line(linetype = 2, size = 1/3) +
+  geom_line(linetype = 2, linewidth = 1/3) +
   geom_function(fun = function(x) invlogit(a + b * x),
-                color = "blue", size = 1) +
+                color = "blue", linewidth = 1) +
   annotate(geom = "text",
            x = c(-0.8, -0.5), y = c(0.5, 0.2),
            label = c("True Curve\ny = invlogit(2 + 3x)",
@@ -203,7 +203,7 @@ p2 <-
   geom_point(data = fake_2,
              aes(shape = as.factor(y))) +
   scale_shape_manual(values = c(19, 1), breaks = NULL) +
-  scale_fill_viridis_c(expression(italic(p)), option = "C", 
+  scale_fill_viridis_c(expression(hat(italic(p))), option = "C", 
                        breaks = 0:2 / 2, limits = 0:1) +
   scale_y_continuous(NULL, breaks = NULL) +
   coord_cartesian(xlim = range(fake_2$x1),
@@ -214,7 +214,7 @@ p2 <-
 p1 + p2
 ```
 
-"These dotted lines in Figure 14.2[a] do *not* represent uncertainty in the line; rather, they convey the variation inherent in the logistic regression model" (p. 242, *emphasis* in the original)
+"These dotted lines in Figure 14.2[a] do *not* represent uncertainty in the line; rather, they convey the variation inherent in the logistic regression model" (p. 242, *emphasis* in the original). Note the fill gradient on the plot in the right panel is based on the mean of the posterior for $\hat p \mid x_1, x_2$.
 
 ## 14.2 Logistic regression with interactions
 
@@ -242,6 +242,8 @@ Check the results.
 ```{r}
 print(m14.3, robust = T)
 ```
+
+Since `arsenic` levels are never zero in the data, the coefficients are difficult to interpret directly.
 
 ### 14.2.1 Centering the input variables.
 
@@ -272,6 +274,54 @@ Check the results.
 
 ```{r}
 print(m14.4, robust = T)
+```
+
+Now the coefficients are a little easier to interpret, particularly $\beta_0$, which is the expected log-odds when the two predictors are at their sample mean values. When comparing the two models, keep in mind "the predictions for new observations are unchanged" (p. 244). We can verify this with a posterior-predictive check.
+
+```{r, fig.width = 6, fig.height = 3.5, message = F}
+set.seed(14)
+p1 <- pp_check(m14.3, type = "bars", ndraws = 1000, linewidth = 1/3, fatten = 1) +
+  scale_x_continuous(breaks = 0:1) +
+  ylim(0, 1900) +
+  ggtitle("m14.3\n(non-centered predictors)")
+
+set.seed(14)
+p2 <- pp_check(m14.4, type = "bars", ndraws = 1000, linewidth = 1/3, fatten = 1) +
+  scale_x_continuous(breaks = 0:1) +
+  scale_y_continuous(NULL, breaks = NULL, limits = c(0, 1900)) +
+  ggtitle("m14.4\n(centered predictors)")
+
+# combine
+p1 + p2 + plot_layout(guides = "collect")
+```
+
+Yes, the overall distributions are the same. We can also check this by plotting the $\hat p_i$ values for each model against one another in a scatter plot.
+
+```{rv, fig.width = 3.5}
+set.seed(14)
+tibble(m14.3 = posterior_epred(m14.3, ndraws = 1) %>% as.vector(),
+       m14.4 = posterior_epred(m14.4, ndraws = 1) %>% as.vector()) %>% 
+  ggplot(aes(x = m14.3, y = m14.4)) +
+  geom_point(size = 1/4) +
+  scale_x_continuous(expression(hat(italic(p))[italic(i)]*" | m14.3"), limits = 0:1) +
+  scale_y_continuous(expression(hat(italic(p))[italic(i)]*" | m14.4"), limits = 0:1) +
+  coord_equal()
+```
+
+The correlation isn't perfect, but it's very close. I suspect the subtle differences are largely a function of MCMC simulation variance and our reliance on default priors. But the correlation is very high.
+
+```{r}
+# correlation on log-odds scale
+set.seed(14)
+tibble(m14.3 = posterior_linpred(m14.3, ndraws = 1) %>% as.vector(),
+       m14.4 = posterior_linpred(m14.4, ndraws = 1) %>% as.vector()) %>%
+  summarise(r = cor(m14.3, m14.4))
+
+# correlation on p scale
+set.seed(14)
+tibble(m14.3 = posterior_epred(m14.3, ndraws = 1) %>% as.vector(),
+       m14.4 = posterior_epred(m14.4, ndraws = 1) %>% as.vector()) %>%
+  summarise(r = cor(m14.3, m14.4))
 ```
 
 ### 14.2.3 Statistical significance of the interaction.
@@ -311,14 +361,17 @@ loo_compare(m14.3, m14.5) %>% print(simplify = F)
 The LOO difference is trivial. Even so, it's still not necessarily wise to move forward as if the interaction term is exactly zero. To get a sense, let's plot.
 
 ```{r, fig.width = 4, fig.height = 3}
-posterior_samples(m14.3) %>% 
+as_draws_df(m14.3) %>% 
   ggplot(aes(x = `b_dist100:arsenic`)) +
   geom_density(size = 0, fill = "grey67") +
   geom_vline(xintercept = 0, linetype = 2, size = 1/3) +
   scale_y_continuous(NULL, breaks = NULL, expand = expansion(mult = c(0, 0.05))) +
-  ggtitle("Zero is a credible value.",
-          subtitle = "Many other values are credible, too.")
+  labs(title = "Zero is a credible value.",
+       subtitle = "Many other values are credible, too.",
+       x = expression(beta[3]))
 ```
+
+> The estimate is not quite two standard errors away from zero and so is not quite "statistically significant." However, as discussed before, this does not mean that we should treat the underlying coefficient as zero. Rather we must accept our uncertainty in the context that it is plausible that arsenic level becomes a less important predictor for households that are farther from the nearest safe well, and the magnitude of the association is also plausible. (p. 244)
 
 ### 14.2.4 Graphing the model with interactions.
 
@@ -327,7 +380,7 @@ Make the `jitter_binary()` function from last chapter.
 ```{r}
 jitter_binary <- function(a, jitt = 0.05) {
   
-  ifelse(a==0, runif(length(a), 0, jitt), runif(length(a), 1 - jitt, 1))
+  ifelse(a == 0, runif(length(a), 0, jitt), runif(length(a), 1 - jitt, 1))
   
 }
 
@@ -404,7 +457,7 @@ p1 + p2
 
 ### 14.2.5 Adding social predictors.
 
-Now fit the model that dropps the interaction term and adds to other predictors.
+Now fit the model that drops the interaction term and adds to other predictors.
 
 ```{r m14.6}
 m14.6 <-
@@ -438,20 +491,24 @@ Check the results.
 print(m14.7, robust = T)
 ```
 
-Compute the LOO estimates.
+Compute the LOO estimates for both.
 
 ```{r, message = F}
 m14.6 <- add_criterion(m14.6, criterion = "loo")
 m14.7 <- add_criterion(m14.7, criterion = "loo")
 ```
 
-Compare the two models by their LOO estimates.
+We'll put the LOO estimates for `m14.6` on the back burner. Here we compare the LOO estimates for `m14.7` and `m14.3`, the model withough the social predictors.
 
 ```{r}
-loo_compare(m14.6, m14.7) %>% print(simplify = F)
+loo_compare(m14.7, m14.3) %>% print(simplify = F)
 ```
 
+"Adding education improves predictive log score, but there is considerable uncertainty" (p 246).
+
 ### 14.2.6 Adding further interactions.
+
+"When inputs have large main effects, it is our general practice to include their interactions as well" (p. 246).
 
 Make a centered version of the `educ4` variable.
 
@@ -478,7 +535,7 @@ Check the results.
 print(m14.8, robust = T)
 ```
 
-The results reported in the text are odd in that the authors appear to have used `educ4` as the lower-order term, but used the centered version `c_educ4` in the interactions. Howevr, if you look at Vehtari's rendered exmaples (see [here](https://avehtari.github.io/ROS-Examples/Arsenic/arsenic_logistic_building.html#More_predictors)), you'll see he used our method where we only used `c_educ4`.
+The results reported in the text are odd in that the authors appear to have used `educ4` as the lower-order term, but used the centered version `c_educ4` in the interactions. However, if you look at Vehtari's rendered examples (see [here](https://avehtari.github.io/ROS-Examples/Arsenic/arsenic_logistic_building.html#More_predictors)), you'll see he used our method where we only used `c_educ4`. Thus, our posterior for $\beta_0$ will match the one posted by Vehtari, not the one in the text.
 
 Compute the LOO estimates.
 
@@ -491,6 +548,8 @@ Use the LOO estimates to compare this model to the earlier one which only includ
 ```{r}
 loo_compare(m14.5, m14.8) %>% print(simplify = F)
 ```
+
+"Adding interactions with `educ4` further improved the LOO log score" (p. 247).
 
 ### 14.2.7 Standardizing predictors.
 
@@ -521,13 +580,13 @@ print(m14.9, robust = T)
 
 Make Figure 14.4.
 
-```{r, fig.width = 6.5, fig.height = 2.75, warning = F}
+```{r, fig.width = 6.5, fig.height = 2.75}
 # save the posterior draws
-post <- posterior_samples(m14.9)
+draws <- as_draws_df(m14.9)
 
 # left
 p1 <-
-  post %>% 
+  draws %>% 
   ggplot(aes(x = b_Intercept, y = b_dist100)) +
   geom_point(size = 1/10, alpha = 2/3) +
   labs(x = expression(beta[0]),
@@ -543,14 +602,12 @@ p2 <-
   wells %>% 
   ggplot(aes(x = dist100, y = jitter_switch)) + 
   geom_point(size = 1/10) +
-  mapply(function(b0, b1) {
-    stat_function(fun = function(x) invlogit(b0 + b1 * x),
-                  size = 1/8, alpha = 1/2)
-  }, 
-  # enter intercepts and slopes
-  b0 = post[1:n, 1],
-  b1 = post[1:n, 2]
-  ) +
+  geom_line(data = draws %>% 
+              slice(1:n) %>% 
+              expand_grid(dist100 = seq(from = 0, to = 3.5, length.out = 100)) %>% 
+              mutate(jitter_switch = invlogit(b_Intercept + b_dist100 * dist100)),
+            aes(group = .draw),
+            size = 1/8, alpha = 1/2) +
   geom_function(fun = function(x) invlogit(fixef(m14.9, robust = T)[1, 1] + fixef(m14.9, robust = T)[2, 1] * x),
                 color = "blue") +
   scale_x_continuous("Distance (in meters) to nearest safe well", 
@@ -558,6 +615,7 @@ p2 <-
                      breaks = 0:3, labels = 0:3 * 100) +
   scale_y_continuous("Pr (switching)", expand = c(0, 0), limits = 0:1) 
 
+# combine
 p1 + p2 + plot_layout(widths = c(2, 3))
 ```
 
@@ -572,8 +630,8 @@ nd <- tibble(dist100 = runif(n = 10, min = 0, max = 2))
 
 post_sim <-
   bind_cols(
-    #posterior draws
-    post %>% 
+    # posterior draws
+    draws %>% 
       transmute(sim = 1:n(),
                 beta0 = b_Intercept,
                 beta1 = b_dist100),
@@ -623,9 +681,9 @@ Recall the latent-variable formulation from Section 13.4, where
 > 
 > with independent errors $\epsilon_i$ that have the *logistic* probability distribution. The logistic distribution is shown in Figure 13.5 and is defined so that
 > 
-> $$\operatorname{Pr}(\epsilon_i < x) = \operatorname{logit}^{-1} (x)\ \text{for all}\ x.$$
+> $$\Pr(\epsilon_i < x) = \operatorname{logit}^{-1} (x)\ \text{for all}\ x.$$
 > 
-> Thus, $\operatorname{Pr}(y_i = 1) = \operatorname{Pr}(z_i > 0) = \operatorname{Pr}(\epsilon_i > -X_i \beta) = \operatorname{logit}^{-1}(X_i \beta)$. (p. 226, *emphasis* in the original)
+> Thus, $\Pr(y_i = 1) = \Pr(z_i > 0) = \Pr(\epsilon_i > -X_i \beta) = \operatorname{logit}^{-1}(X_i \beta)$. (p. 226, *emphasis* in the original)
 
 As far as I can tell, the **brms**-convenience-function based approach to simulating "logistic regression predictions us[ing] the latent-data formulation" (p. 248) is a little cumbersome. Here are the steps. First, we poll the log-odds probabilities for the $X^\text{new}$ values (`nd`) using `fitted()`.
 
@@ -641,7 +699,7 @@ log_odds_p <-
 glimpse(log_odds_p)
 ```
 
-Seocnd, we make a $4{,}000 \times 10$ data frame for the $\epsilon^\text{new}$ values.
+Second, we make a $4{,}000 \times 10$ data frame for the $\epsilon^\text{new}$ values.
 
 ```{r}
 set.seed(14)
@@ -690,11 +748,11 @@ y_new %>%
 
 ## 14.4 Average predictive comparisons on the probability scale
 
-> Logistic regressions are nonlinear on the probability scale and linear on the logit scale. This is because logistic regression is linear in the parameters but nonlinear in the relation of inputs to outcome. A specified difference in one of the $x$ variables does *not* correspond to a constant difference in $\operatorname{Pr}(y = 1)$. As a result, logistic regression coefficients cannot directly be interpreted on the scale of the data. Logistic regressions are inherently more difficult than linear regressions to interpret.
+> Logistic regressions are nonlinear on the probability scale and linear on the logit scale. This is because logistic regression is linear in the parameters but nonlinear in the relation of inputs to outcome. A specified difference in one of the $x$ variables does *not* correspond to a constant difference in $\Pr(y = 1)$. As a result, logistic regression coefficients cannot directly be interpreted on the scale of the data. Logistic regressions are inherently more difficult than linear regressions to interpret.
 > 
-> [Even still,] it is helpful to have a summary, comparable to the linear regression coefficient, which gives the expected, or average, difference in $\operatorname{Pr}(y = 1)$ corresponding to a unit difference in each of the input variables. In this section we describe a way to construct such a summary. (p. 249, *emphasis* in the original)
+> [Even still,] it is helpful to have a summary, comparable to the linear regression coefficient, which gives the expected, or average, difference in $\Pr(y = 1)$ corresponding to a unit difference in each of the input variables. In this section we describe a way to construct such a summary. (p. 249, *emphasis* in the original)
 
-Imagine modeling a binary $y$ variable with input data $x$. Those $x$ input data can be divided in to the data from the predictor of interest, $u$, and the remaining predictors, $v$. Thus our input data are $x = (u, v)$.
+Imagine modeling a binary $y$ variable with input data $x$. Those $x$ input data can be divided into the data from the predictor of interest, $u$, and the remaining predictors, $v$. Thus our input data are $x = (u, v)$.
 
 We can compare a high ($u^\text{high}$) and low ($u^\text{low}$) value for our predictor of interest with all other inputs ($v$) held constant, following the formula
 
@@ -702,11 +760,178 @@ $$\text{predictive difference} = \operatorname E(y | u^\text{high}, v, \theta) -
 
 where $\theta$ is a stand-in for the model parameters and the *predictive difference* is our summary. An important thing to grasp, here, is this isn't a simple counterfactual of the kind we'd plot with `conditional_effects()`. The predictive difference is based systemically varying the $u$ values while retaining all the $v$ inputs from the original data. Thus, the validity of the predictive difference approach is tethered to the validity of the sample data.
 
+This approach is also what our friends in epidemiology call *standardization*.
+
 ### 14.4.1 Problems with evaluating predictive comparisons at a central value.
 
-Other approaches, such as more conventional counterfactual approaches done with `conditional_effects()` or `fitted()`, can fail if the $v$ input data are binary, bimodal, or widely dispersed. In those cases, it's hard to know what values to fix the counterfactual $v$ values on. 
+Other approaches, such as more conventional counterfactual approaches done with `conditional_effects()` or `fitted()`, can fail if the $v$ input data are binary, bimodal, or widely dispersed. In those cases, it's hard to know what values to fix the counterfactual $v$ values on. This will generally be the case whenever you're using a link function.
 
-It looks like we don't have the data necessary to reproduce Figures 14.6 and 14.7.
+I find Figure 14.6 baffling and perhaps mis-drawn, so we'll move forward. It looks like we don't have the data underlying Figure  14.7, but it's worth taking the time to simulate similar data. Here's an attempt with $N = 1{,}000$ cases.
+
+```{r}
+# how many do you want?
+n <- 1000
+
+# set the population parameters
+b0 <- logit(0.1)
+b1 <- logit(0.2) - logit(0.1)
+b2 <- 1
+
+# simulate
+set.seed(14)
+
+fake_3 <- 
+  tibble(u = rbinom(n = n, size = 1, prob = 0.5),
+         v = runif(n = n, min = -8, max = 8)) %>% 
+  mutate(y = rbinom(n, size = 1, p = invlogit(b0 + b1 * u + b2 * v)))
+
+# what?
+glimpse(fake_3)
+```
+
+Here for simplicity, I'm just going to fit a quick ML-baesd logistic regression model with `glm()`.
+
+```{r}
+# fit
+glm1 <- glm(
+  data = fake_3,
+  family = binomial,
+  y ~ 1 + u + v
+)
+
+# summarize
+summary(glm1)
+```
+
+Here we'll plot a prototype of Figure 14.7, to which we'll add in a moment.
+
+```{r, fig.width = 4, fig.height = 3.25}
+nd_lines <- 
+  crossing(u = 0:1,
+           v = seq(from = -8, to = 8, by = 0.1))
+
+nd_lines %>% 
+  mutate(p = predict(glm1, newdata = nd_lines, type = "response"),
+         u = factor(u)) %>%
+  
+  ggplot(aes(x = v, y = p, group = u, color = u)) +
+  geom_line() +
+  scale_x_continuous(breaks = -4:4 * 2) +
+  scale_y_continuous("E(y | u, v)", breaks = 0:5 / 5, 
+                     limits = 0:1, expand = expansion(mult = 0)) +
+  coord_cartesian(xlim = c(-6.7, 7.5))
+```
+
+Looks like our simulated `fake_3` data got pretty close to whatever was underlying Figure 14.7 in the text.
+
+Now as far as I can tell, the lines in the two panels of Figure 14.7 are identical, which leads me to believe they are not based on models fit to small-sample data. Thus, I believe the small sample subsets depicted in the rub plots of the two panels of Figure 14.7 were not used to actually make the curves. But those two small sample subsets were used to compute the values called "avg pred diff" and "pred diff at E(v)."
+
+Here's how we might take two $n = 50$ subsets of our full `fake_3` data, which match the broad distributional qualities in the subsets in the figure.
+
+```{r}
+# left panel
+set.seed(14)
+
+subset_1 <- 
+  fake_3 %>% 
+  filter(between(v, -4, -0.7) | between(v, 3.8, 6.2)) %>% 
+  slice_sample(n = 50)
+
+# right panel
+set.seed(14)
+
+subset_2 <- 
+  fake_3 %>% 
+  filter(between(v, -7.3, -4.8) | between(v, -0.4, 3)) %>%
+  slice_sample(n = 50)
+```
+
+Now we can make our two panels for Figure 14.7, with the sample subsets depicted with rug plots.
+
+```{r, fig.width = 8, fig.height = 3.25}
+p1 <- nd_lines %>% 
+  mutate(p = predict(glm1, newdata = nd_lines, type = "response"),
+         u = factor(u)) %>%
+  
+  ggplot(aes(x = v)) +
+  geom_line(aes(y = p, group = u, color = u)) +
+  geom_rug(data = subset_1,
+           linewidth = 1/4) +
+  scale_x_continuous(breaks = -4:4 * 2) +
+  scale_y_continuous("E(y | u, v)", breaks = 0:5 / 5, 
+                     limits = 0:1, expand = expansion(mult = 0)) +
+  coord_cartesian(xlim = c(-6.7, 7.5))
+
+p2 <- nd_lines %>% 
+  mutate(p = predict(glm1, newdata = nd_lines, type = "response"),
+         u = factor(u)) %>%
+  
+  ggplot(aes(x = v)) +
+  geom_line(aes(y = p, group = u, color = u)) +
+  geom_rug(data = subset_2,
+           linewidth = 1/4) +
+  scale_x_continuous(breaks = -4:4 * 2) +
+  scale_y_continuous(NULL, breaks = NULL, 
+                     limits = 0:1, expand = expansion(mult = 0)) +
+  coord_cartesian(xlim = c(-6.7, 7.5))
+
+# combine 
+p1 + p2 + plot_layout(guides = "collect")
+```
+
+It will be easiest to compute our "avg pred diff" and "pred diff at E(v)" values with the **marginaleffects** package.
+
+```{r}
+library(marginaleffects)
+```
+
+Here are the "avg pred diff" and "pred diff at E(v)" estimates for the first subset.
+
+```{r}
+# avg pred diff
+avg_comparisons(glm1, 
+                # averaged over the cases in subset_1
+                newdata = subset_1,
+                variable = "u") %>% 
+  data.frame() %>% 
+  select(estimate, starts_with("conf")) %>% 
+  mutate_all(round, digits = 3)
+
+# pred diff at E(v)
+predictions(glm1, 
+            # based on the average of v in subset_1
+            newdata = tibble(u = 0:1, v = mean(subset_1$v)), 
+            hypothesis = "revpairwise") %>% 
+  data.frame() %>% 
+  select(estimate, starts_with("conf")) %>% 
+  mutate_all(round, digits = 3)
+```
+
+Our estimates aren't identical to those in the text, but they're in the ballpark, and they make the same overall point. Here are the results for the second subset.
+
+```{r}
+# avg pred diff
+avg_comparisons(glm1, 
+                # averaged over the cases in subset_2
+                newdata = subset_2,
+                variable = "u") %>% 
+  data.frame() %>% 
+  select(estimate, starts_with("conf")) %>% 
+  mutate_all(round, digits = 3)
+
+# pred diff at E(v)
+predictions(glm1, 
+            # based on the average of v in subset_2
+            newdata = tibble(u = 0:1, v = mean(subset_2$v)), 
+            hypothesis = "revpairwise") %>% 
+  data.frame() %>% 
+  select(estimate, starts_with("conf")) %>% 
+  mutate_all(round, digits = 3)
+```
+
+As before, not identical, but they make the same overall point.
+
+Even though we got lazy and used the frequentist `glm()`, we could have made the same overall point with `brm()`. Many of the functions from **marginaleffects** will work with **brms** models.
 
 ### 14.4.2 Demonstration with the well-switching example.
 
@@ -715,6 +940,8 @@ Review the summary from model `m14.7`.
 ```{r}
 print(m14.7, robust = T)
 ```
+
+Note that this model does not include interaction terms. The points to follow would work for models with those, too, but we won't need them. The only thing we need is a non-identity link function. You'll see.
 
 #### 14.4.2.1 Average predictive difference in probability of switching.
 
@@ -780,9 +1007,48 @@ wells %>%
   geom_vline(xintercept = mean(delta), color = "red3", linetype = 2)
 ```
 
-The crucial point for this computation is that it is *on average in the data*:
+The crucial point for this computation is that it is *on average in the sample data*:
 
 > The result is −0.21, implying that, on average in the data, households that are 100 meters from the nearest safe well are 21% less likely to switch, compared to households that are right next to the nearest safe well, at the same arsenic and education levels. (p. 251)
+
+Just to keep clarifying what's going on, here's an alternative approach. First we define a data grid with the original values for `arsenic` and `educ4`, but with counterfactual values for the focal predictor `dist100`. Also notice we've added a `case` index for clarity.
+
+```{r}
+nd <- wells %>% 
+  mutate(case = 1:n()) %>% 
+  select(case, arsenic, educ4) %>% 
+  expand_grid(dist100 = c(lo, hi))
+  
+# what?
+glimpse(nd)
+```
+
+Now we compute the counterfactual predictions with `fitted()`. Note how we've used the `[, "Estimate"]` notation to just pull the posterior medians for each prediction.
+
+```{r}
+nd <-
+  nd %>% 
+  mutate(p_hat = fitted(m14.7, newdata = nd, robust = T)[, "Estimate"])
+
+# what?
+head(nd)
+```
+
+Now we use `pivot_wider()` and `mutate()` to compute the casewise contrasts for those posterior medians, and then plot.
+
+```{r, fig.width = 4, fig.height = 2.75}
+nd_delta <- nd %>% 
+  pivot_wider(names_from = dist100, values_from = p_hat) %>% 
+  mutate(delta = `1` - `0`) 
+
+nd_delta %>% 
+  ggplot(aes(x = delta)) +
+  geom_histogram(binwidth = 0.01, boundary = 0) +
+  # add in the mean of delta as a reference point
+  geom_vline(xintercept = mean(nd_delta$delta), color = "red3", linetype = 2)
+```
+
+Note how these results are similar with, but not identical to, the results from before. That's because of subtle differences in the methods. In the method from the text, we used the posterior medians from the model parameters to make point predictions, and their contrasts. In the method just above, we used the full posterior to make the predictions, but then summarized those predictions by their posterior medians. Frankly, I don't know that one is more right than the other, but I prefer this one to the one in the text.
 
 #### 14.4.2.2 Comparing probabilities of switching for households differing in arsenic levels.
 
@@ -827,6 +1093,27 @@ wells %>%
 
 "So this comparison corresponds to a [about] 6% difference in probability of switching" (p. 252).
 
+If you want proper 95% CI's around that posterior, you can use this very thrifty `avg_comparisons()` code.
+
+```{r}
+avg_comparisons(m14.7, variable = list(arsenic = c(hi, lo)))
+```
+
+If you'd like to plot the full posterior distribution of that weighted $\delta$, you can feed the `avg_comparisons()` output into `posterior_draws()` and then showcase the results with `stat_halfeye()`.
+
+```{r, fig.width = 4, fig.height = 2.75}
+library(tidybayes)
+
+avg_comparisons(m14.7, variable = list(arsenic = c(hi, lo))) %>% 
+  posterior_draws() %>% 
+  
+  ggplot(aes(x = draw)) +
+  stat_halfeye(.width = c(0.5, 0.95)) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  labs(subtitle = "1 - 0.5 for arsenic",
+       x = "average predictive difference")
+```
+
 #### 14.4.2.3 Average predictive difference in probability of switching, comparing householders with 0 and 12 years of education.
 
 Now use this approach holding `dist100` and `arsenic` constant, but varying `educ4` such that the low value is `educ4 == 0` and the high value is `educ4 == 3`.
@@ -869,6 +1156,25 @@ wells %>%
 ```
 
 This "comes to [about] 0.12, a difference of [about] 12 percentage points" (p. 252).
+
+Here's the fuller posterior summary with `avg_comparisons()`.
+
+```{r}
+avg_comparisons(m14.7, variable = list(educ4 = c(hi, lo)))
+```
+
+Here's the full posterior for that sample-averaged contrast in a plot.
+
+```{r, fig.width = 4, fig.height = 2.75}
+avg_comparisons(m14.7, variable = list(educ4 = c(hi, lo))) %>% 
+  posterior_draws() %>% 
+  
+  ggplot(aes(x = draw)) +
+  stat_halfeye(.width = c(0.5, 0.95)) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  labs(subtitle = "3 - 0 for educ4",
+       x = "average predictive difference")
+```
 
 ### 14.4.3 Average predictive comparisons in the presence of interactions.
 
@@ -924,6 +1230,19 @@ wells %>%
   xlab(expression(delta))
 ```
 
+Here's the full posterior for that sample-averaged contrast in a plot.
+
+```{r, fig.width = 4, fig.height = 2.75}
+avg_comparisons(m14.8, variable = list(c_dist100 = c(hi, lo))) %>% 
+  posterior_draws() %>% 
+  
+  ggplot(aes(x = draw)) +
+  stat_halfeye(.width = c(0.5, 0.95)) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  labs(subtitle = "1 - 0 for c_dist100",
+       x = "average predictive difference")
+```
+
 ## 14.5 Residuals for discrete-data regression
 
 ### 14.5.1 Residuals and binned residuals
@@ -947,9 +1266,9 @@ p1 <-
          rul = r[, 4],
          ftd = f[, 1]) %>% 
   ggplot(aes(x = ftd, y = res, ymin = rll, ymax = rul)) +
-  geom_hline(yintercept = 0, size = 1/4, color = "grey75") +
+  geom_hline(yintercept = 0, linewidth = 1/4, color = "grey75") +
   scale_x_continuous(breaks = 0:5 / 5, expand = c(0, 0), limits = 0:1) +
-  geom_pointrange(size = 1/10, fatten = 1/4) +
+  geom_pointrange(linewidth = 1/10, fatten = 1/4) +
   labs(subtitle = "Residual plot",
        x = "Estimated Pr (switching)",
        y = "Observed - Estimated")
@@ -967,7 +1286,7 @@ You can go [here](https://avehtari.github.io/ROS-Examples/Arsenic/arsenic_logist
 set.seed(14)
 
 p2 <-
-  pp_check(m14.8, type = "error_binned", nsamples = 1, bins = 40) +
+  pp_check(m14.8, type = "error_binned", ndraws = 1, bins = 40) +
   labs(subtitle = "Binned residual plot",
        x = "Estimated Pr (switching)",
        y = "Average residual")
@@ -976,10 +1295,10 @@ p2 <-
 p1 + p2
 ```
 
-You may have notices we set a seed value, above. Making binned residuals, like this, is a stochastic process. To get a sense, here we set `nsamples = 9`.
+You may have noticed we set a seed value, above. Making binned residuals, like this, is a stochastic process. To get a sense, here we set `ndraws = 9`.
 
 ```{r, fig.width = 7.5, fig.height = 5.5}
-pp_check(m14.8, type = "error_binned", nsamples = 9, bins = 40) +
+pp_check(m14.8, type = "error_binned", ndraws = 9, bins = 40) +
   ggtitle("Binned residual plots have random elements.",
           subtitle = "Here are nine random draws.")
 ```
@@ -1026,7 +1345,7 @@ p1 <-
   geom_ribbon(aes(ymin = -X2se, ymax = X2se),
               # colors from https://www.color-hex.com/color/ffa500#:~:text=%23ffa500%20color%20name%20is%20Orange,of%20its%20RGB%20is%200.
               fill = "#fff6e5", color = "#ffdb99") +
-  geom_hline(yintercept = 0, color = "#ffb732", size = 1/4, linetype = 2) +
+  geom_hline(yintercept = 0, color = "#ffb732", linewidth = 1/4, linetype = 2) +
   geom_point(aes(y = ybar),
              size = 1/3) +
   scale_x_continuous("Distance to nearest safe well",
@@ -1042,7 +1361,7 @@ p2 <-
   geom_ribbon(aes(ymin = -X2se, ymax = X2se),
               # colors from https://www.colorhexa.com/800080
               fill = "#ffe2ff", color = "#ffbbff") +
-  geom_hline(yintercept = 0, color = "#ff80ff", size = 1/4, linetype = 2) +
+  geom_hline(yintercept = 0, color = "#ff80ff", linewidth = 1/4, linetype = 2) +
   geom_point(aes(y = ybar),
              size = 1/3) +
   scale_x_continuous("Arsenic level", breaks = 0:5, limits = c(0, NA)) +
@@ -1138,7 +1457,7 @@ p2 <-
   geom_ribbon(aes(ymin = -X2se, ymax = X2se),
               # colors from https://www.colorhexa.com/800080
               fill = "#ffe2ff", color = "#ffbbff") +
-  geom_hline(yintercept = 0, color = "#ff80ff", size = 1/4, linetype = 2) +
+  geom_hline(yintercept = 0, color = "#ff80ff", linewidth = 1/4, linetype = 2) +
   geom_point(aes(y = ybar),
              size = 1/3) +
   scale_x_continuous("Arsenic level", breaks = 0:5, limits = c(0, NA)) +
@@ -1175,6 +1494,8 @@ wells %>%
   summarise(mean = mean((e_prob > 0.5 & switch == 0) | (e_prob < 0.5 & switch == 1)))
 ```
 
+"An error rate of 36%, is only 6 percentage points better than the 42% error rate obtainable in this dataset by simply guessing that all people will switch" (p. 255).
+
 ### 14.5.5 Where error rate can mislead.
 
 "The error rate can be a useful summary, but it does not tell the whole story, especially in settings where predicted probabilities are close to zero" (p. 255).
@@ -1192,7 +1513,7 @@ Load the `nes.txt` data.
 nes <- 
   read.table("ROS-Examples-master/NES/data/nes.txt", header = T)
 
-head(nes)
+glimpse(nes)
 ```
 
 Drop missing cases and make sure the remaining votes were only for the Republican or Democratic candidates.
@@ -1286,7 +1607,7 @@ It's beyond my current skill set to make a *profile likelihood* plot for the max
 nd <-
   tibble(female = 0.5406427,
          income = 3.007561,
-         black = seq(from = 0, to = 1, length.out = 200))
+         black = seq(from = 0, to = 1, length.out = 500))
 
 #left
 p1 <-
@@ -1461,13 +1782,15 @@ p4 <-
 
 # combine!
 (p1 | p2 | p3 | p4) &
-  geom_hline(yintercept = 0, linetype = 2, size = 1/4) &
-  geom_pointrange(size = 1/4, fatten = 1/2) &
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1/4) &
+  geom_pointrange(linewidth = 1/4, fatten = 1/2) &
   scale_x_continuous("Year", breaks = 0:2 * 20 + 1960) &
   facet_grid(prior ~ parameter, labeller = label_parsed) &
   theme(axis.text = element_text(size = 7),
         axis.title = element_text(size = 9))
 ```
+
+The results of our fully Bayesian models resemble those from the text.
 
 ### 14.6.1 Weakly informative default prior compared to actual prior information.
 
